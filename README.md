@@ -516,8 +516,11 @@ corgi_custom/
 │   │   └── test_unified_pipeline.py # Unified pipeline test ⭐ NEW
 │   └── unit/                       # Unit tests
 ├── archive/                        # Archived legacy files
-│   ├── legacy_entrypoints/         # Old app entrypoints
-│   └── legacy_inference/           # Old inference scripts
+│   ├── legacy_apps/                # Old Gradio apps (app_v2.py, etc.)
+│   ├── legacy_inference/           # Old inference scripts
+│   ├── legacy_scripts/             # Old bash scripts
+│   ├── legacy_tests/               # Old test files
+│   └── test_results/               # Old test outputs
 │
 │ ── ENTRYPOINTS (Use These) ────────
 ├── inference.py                    # Unified CLI inference (V1+V2) ⭐
@@ -525,11 +528,6 @@ corgi_custom/
 ├── app_unified.py                  # Unified Gradio app (all modes) ⭐
 ├── gradio_chatbot_v2.py            # Streaming chatbot UI ⭐
 │
-│ ── DEPRECATED (Backward Compat) ───
-├── inference_v2.py                 # (deprecated → use inference.py)
-├── app_v2.py                       # (deprecated → use app_unified.py)
-├── app_qwen_only.py                # (deprecated → use app_unified.py)
-├── app.py                          # (deprecated → use app_unified.py)
 │
 ├── requirements.txt                # Python dependencies
 └── README.md                       # This file
