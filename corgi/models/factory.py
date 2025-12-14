@@ -289,7 +289,21 @@ class CompositeVLMClient:
         """
         # Delegate to synthesis model
         if hasattr(self.synthesis, "synthesize_answer"):
-            return self.synthesis.synthesize_answer(image, question, steps, evidences)
+            answer, key_evidence, explanation = self.synthesis.synthesize_answer(
+                image, question, steps, evidences
+            )
+
+            # Copy prompt/response logs from synthesis model for UI/debugging.
+            if hasattr(self.synthesis, "answer_log"):
+                self._answer_log = self.synthesis.answer_log
+
+            # Copy paraphrased_question if available.
+            if hasattr(self.synthesis, "_paraphrased_question"):
+                self._paraphrased_question = self.synthesis._paraphrased_question
+            else:
+                self._paraphrased_question = None
+
+            return answer, key_evidence, explanation
         else:
             # Fallback: use basic synthesis
             logger.warning("Using basic synthesis (no dedicated synthesis model)")

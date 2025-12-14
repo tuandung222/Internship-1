@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import hashlib
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -245,9 +246,16 @@ def _run_pipeline(
     except Exception:
         trace_entries = []
 
+    payload_start = time.time()
     payload = _prepare_ui_payload_components(
         rgb_image, result, MAX_UI_STEPS, trace_entries=trace_entries
     )
+    try:
+        logger.info(
+            "Prepared UI payload in %.1fms", (time.time() - payload_start) * 1000.0
+        )
+    except Exception:
+        pass
     return new_state, payload
 
 
@@ -259,6 +267,13 @@ def _prepare_ui_payload_components(
     trace_entries: Optional[List[dict]] = None,
 ) -> Dict[str, object]:
     """Prepare UI payload using Gradio components instead of HTML."""
+    def _truncate_for_ui(text: str, max_chars: int = 12000) -> str:
+        text = (text or "").strip()
+        if not text:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return text[:max_chars] + "\n\n...[truncated]..."
 
     # Prepare galleries
     roi_gallery: List[Tuple[Image.Image, str]] = []
@@ -287,7 +302,7 @@ def _prepare_ui_payload_components(
     explanation_text = result.explanation or ""
 
     # Chain of Thought
-    cot_text = result.cot_text or ""
+    cot_text = _truncate_for_ui(result.cot_text or "")
     structured_steps_text = _format_structured_steps_text(
         result.steps[:max_slots], result.evidence
     )
@@ -315,12 +330,18 @@ def _prepare_ui_payload_components(
     answer_prompt_text = _format_prompt_text(result.answer_log, "Answer Synthesis")
 
     # Raw prompt I/O (for trace-style UI)
-    reasoning_prompt_raw = result.reasoning_log.prompt if result.reasoning_log else ""
-    reasoning_response_raw = (
+    reasoning_prompt_raw = _truncate_for_ui(
+        result.reasoning_log.prompt if result.reasoning_log else ""
+    )
+    reasoning_response_raw = _truncate_for_ui(
         result.reasoning_log.response if result.reasoning_log else ""
     )
-    synthesis_prompt_raw = result.answer_log.prompt if result.answer_log else ""
-    synthesis_response_raw = result.answer_log.response if result.answer_log else ""
+    synthesis_prompt_raw = _truncate_for_ui(
+        result.answer_log.prompt if result.answer_log else ""
+    )
+    synthesis_response_raw = _truncate_for_ui(
+        result.answer_log.response if result.answer_log else ""
+    )
 
     # Structured JSON views
     try:
@@ -381,7 +402,7 @@ def _prepare_ui_payload_components(
     captioning_table_text = _format_evidence_table_text(captioning_evidence, image)
 
     # Raw outputs
-    raw_outputs_text = _format_raw_outputs_text(result)
+    raw_outputs_text = _truncate_for_ui(_format_raw_outputs_text(result), max_chars=16000)
 
     return {
         # Input image (for display at top of tabs)
@@ -534,17 +555,24 @@ def _format_trace_markdown(
     trace_entries: List[dict],
 ) -> str:
     """Generate a scrollable Markdown trace with raw I/O for each pipeline stage."""
+    MAX_BLOCK_CHARS = 12000
+
     def _code_block(lang: str, text: str) -> str:
         text = (text or "").strip()
         if not text:
             return f"```{lang}\n\n```"
+        if len(text) > MAX_BLOCK_CHARS:
+            text = text[:MAX_BLOCK_CHARS] + "\n\n...[truncated]..."
         return f"```{lang}\n{text}\n```"
 
     def _json_block(obj: object) -> str:
         import json
 
         try:
-            return _code_block("json", json.dumps(obj, ensure_ascii=False, indent=2))
+            dumped = json.dumps(obj, ensure_ascii=False, indent=2)
+            if len(dumped) > MAX_BLOCK_CHARS:
+                dumped = dumped[:MAX_BLOCK_CHARS] + "\n\n...[truncated]..."
+            return _code_block("json", dumped)
         except Exception:
             return _code_block("json", "[]")
 
@@ -720,7 +748,7 @@ def _format_evidence_table_text(
         has_ocr = ev.ocr_text and ev.ocr_text.strip() and ev.ocr_text != "N/A"
         step_display = f"**{ev.step_index}**"
         if has_ocr:
-            step_display = f"**{ev.step_index}** 🏷️"  # Add OCR indicator
+            step_display = f"**{ev.step_index}** (OCR)"
 
         lines.append(
             f"| {step_display} | {bbox_norm} | {bbox_px} | {desc} | {ocr_text} | {conf} |"
@@ -1074,18 +1102,8 @@ def build_demo(
         gr.Markdown("## Pipeline Results")
 
         # A single scrollable trace view (Markdown) with raw I/O per stage.
-        with gr.Accordion("Trace (Raw I/O per stage — scroll down)", open=True):
+        with gr.Accordion("Trace (Raw I/O per stage — scroll down)", open=False):
             trace_markdown_output = gr.Markdown()
-        
-        # Hidden image displays (not needed in scrollable layout)
-        input_image_final = gr.Image(visible=False)
-        input_image_reasoning = gr.Image(visible=False)
-        input_image_grounding = gr.Image(visible=False)
-        input_image_evidence = gr.Image(visible=False)
-        input_image_ocr = gr.Image(visible=False)
-        input_image_captioning = gr.Image(visible=False)
-        input_image_synthesis = gr.Image(visible=False)
-        paraphrased_question_output = gr.Textbox(visible=False)
 
         # -----------------------------------------------------------------
         # STAGE 1: Reasoning
@@ -1321,7 +1339,6 @@ def build_demo(
             )
 
             # Return all outputs with proper visibility handling
-            has_paraphrased = bool(payload.get("paraphrased_question"))
             has_roi_overview = payload.get("roi_overview_image") is not None
             has_roi_gallery = len(payload.get("roi_gallery", [])) > 0
             has_key_overview = payload.get("key_evidence_overview_image") is not None
@@ -1329,7 +1346,6 @@ def build_demo(
             has_cropped_gallery = len(payload.get("cropped_images_gallery", [])) > 0
             has_ocr_gallery = len(payload.get("ocr_gallery", [])) > 0
             has_captioning_gallery = len(payload.get("captioning_gallery", [])) > 0
-            input_image = payload.get("input_image")
             step_panels = payload.get("step_panels") or [
                 {"visible": False, "markdown": "", "gallery": [], "has_gallery": False}
                 for _ in range(MAX_UI_STEPS)
@@ -1338,20 +1354,8 @@ def build_demo(
             outputs = [
                 new_state,
                 payload.get("trace_markdown", ""),
-                # Final Answer Tab
-                gr.update(
-                    value=None, visible=False
-                ),  # input_image_final
                 payload["final_answer"],
                 payload["explanation"],
-                gr.update(
-                    value=payload.get("paraphrased_question", ""),
-                    visible=has_paraphrased,
-                ),
-                # Reasoning Tab
-                gr.update(
-                    value=None, visible=False
-                ),  # input_image_reasoning
                 payload["cot_text"],
                 payload["structured_steps"],
                 payload.get("structured_steps_json", []),
@@ -1377,39 +1381,24 @@ def build_demo(
                 ),
                 # Grounding Tab
                 gr.update(
-                    value=None, visible=False
-                ),  # input_image_grounding
-                gr.update(
                     value=payload.get("roi_overview_image"), visible=has_roi_overview
                 ),
                 gr.update(value=payload["roi_gallery"], visible=has_roi_gallery),
                 payload["grounding_prompts"],
                 # Evidence Tab
-                gr.update(
-                    value=None, visible=False
-                ),  # input_image_evidence
                 payload["evidence_table"],
                 gr.update(
                     value=payload["cropped_images_gallery"], visible=has_cropped_gallery
                 ),
                 # OCR Results Tab
-                gr.update(
-                    value=None, visible=False
-                ),  # input_image_ocr
                 payload["ocr_table"],
                 gr.update(value=payload["ocr_gallery"], visible=has_ocr_gallery),
                 # Captioning Results Tab
-                gr.update(
-                    value=None, visible=False
-                ),  # input_image_captioning
                 payload["captioning_table"],
                 gr.update(
                     value=payload["captioning_gallery"], visible=has_captioning_gallery
                 ),
                 # Synthesis Tab
-                gr.update(
-                    value=None, visible=False
-                ),  # input_image_synthesis
                 gr.update(
                     value=payload.get("key_evidence_overview_image"),
                     visible=has_key_overview,
@@ -1448,13 +1437,8 @@ def build_demo(
             outputs=[
                 state,
                 trace_markdown_output,
-                # Final Answer Tab
-                input_image_final,
                 final_answer_output,
                 explanation_output,
-                paraphrased_question_output,
-                # Reasoning Tab
-                input_image_reasoning,
                 cot_output,
                 structured_steps_output,
                 structured_steps_json_output,
@@ -1470,25 +1454,15 @@ def build_demo(
                         )
                     )
                 ),
-                # Grounding Tab
-                input_image_grounding,
                 roi_overview_output,
                 roi_gallery_output,
                 grounding_prompts_output,
-                # Evidence Tab
-                input_image_evidence,
                 evidence_table_output,
                 cropped_images_gallery_output,
-                # OCR Results Tab
-                input_image_ocr,
                 ocr_table_output,
                 ocr_gallery_output,
-                # Captioning Results Tab
-                input_image_captioning,
                 captioning_table_output,
                 captioning_gallery_output,
-                # Synthesis Tab
-                input_image_synthesis,
                 key_evidence_overview_output,
                 key_evidence_gallery_output,
                 key_evidence_text_output,

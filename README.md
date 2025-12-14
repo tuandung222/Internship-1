@@ -451,12 +451,6 @@ corgi_custom/
 │   │   ├── test_real_pipeline.py   # V1 pipeline test
 │   │   └── test_unified_pipeline.py # Unified pipeline test
 │   └── unit/                       # Unit tests
-├── archive/                        # Archived legacy files
-│   ├── legacy_apps/                # Old Gradio apps (app_v2.py, etc.)
-│   ├── legacy_inference/           # Old inference scripts
-│   ├── legacy_scripts/             # Old bash scripts
-│   ├── legacy_tests/               # Old test files
-│   └── test_results/               # Old test outputs
 │
 │ ── ENTRYPOINTS (Use These) ────────
 ├── inference.py                    # Unified CLI inference (V1+V2)
@@ -480,7 +474,6 @@ Available documentation in `docs/`:
 | [QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) | Quick usage reference |
 | [CODEBASE_ANALYSIS.md](docs/CODEBASE_ANALYSIS.md) | Codebase analysis notes |
 | [REFACTOR_PLAN.md](docs/REFACTOR_PLAN.md) | Refactor plan |
-| [REFACTOR_ROADMAP.md](docs/REFACTOR_ROADMAP.md) | Refactor roadmap |
 
 ---
 
