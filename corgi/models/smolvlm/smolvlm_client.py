@@ -316,12 +316,29 @@ class SmolVLM2CaptioningClient:
             for messages in messages_batch
         ]
 
-        inputs = self._processor(
-            text=texts,
-            images=images,
-            return_tensors="pt",
-            padding=True,
-        ).to(self._model.device, dtype=self._model.dtype)
+        try:
+            inputs = self._processor(
+                text=texts,
+                images=images,
+                return_tensors="pt",
+                padding=True,
+            )
+        except Exception as e:
+            # Some processors expect `images` as a list-of-lists (one image list per sample).
+            # When batching multiple regions, passing a flat list can be interpreted as
+            # "multiple images for one sample" and triggers a mismatch error.
+            msg = str(e)
+            if "number of images in the text" in msg.lower():
+                inputs = self._processor(
+                    text=texts,
+                    images=[[img] for img in images],
+                    return_tensors="pt",
+                    padding=True,
+                )
+            else:
+                raise
+
+        inputs = inputs.to(self._model.device, dtype=self._model.dtype)
 
         with torch.no_grad():
             outputs = self._model.generate(

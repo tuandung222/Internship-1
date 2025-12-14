@@ -92,3 +92,10 @@ huggingface_hub/
 # Notebooks outputs  
 notebooks/outputs/
 notebooks/*.html
+
+# Local archives / large scratch data (do not track)
+archive/
+archive_docs/
+archived_results/
+archived_results_2/
+test_data/
