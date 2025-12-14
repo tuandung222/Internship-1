@@ -119,11 +119,12 @@ def _create_pipeline_from_config_v2(
         logger.error(f"Config validation failed: {constraint_error}")
         raise
 
-    if config.requires_parallel_loading() and not parallel_loading:
+    # Note: Previously force-enabled parallel loading. This caused "meta tensor" errors.
+    # Now we respect the user's choice for stability.
+    if config.requires_parallel_loading():
         logger.info(
-            "Overriding parallel_loading=True because multiple distinct models must be loaded in parallel."
+            f"Multiple distinct models detected. Loading mode: {'parallel' if parallel_loading else 'sequential'}"
         )
-        parallel_loading = True
 
     # Create VLM client using factory
     client = VLMClientFactory.create_from_config(

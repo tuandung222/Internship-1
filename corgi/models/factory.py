@@ -927,11 +927,17 @@ class VLMClientFactory:
         """
         logger.info("Creating VLM client from configuration")
         load_start = time.time()
-        if config.requires_parallel_loading() and not parallel_loading:
+        
+        # Note: Previously we force-enabled parallel loading when multiple models exist.
+        # This caused "meta tensor" errors on some systems. Now we respect the user's choice.
+        if config.requires_parallel_loading() and parallel_loading:
             logger.info(
-                "Force-enabling parallel model loading because configuration uses multiple distinct models."
+                "Multiple distinct models detected. Using parallel loading for faster startup."
             )
-            parallel_loading = True
+        elif config.requires_parallel_loading() and not parallel_loading:
+            logger.info(
+                "Multiple distinct models detected. Using sequential loading (slower but more stable)."
+            )
 
         # Determine which models need to be loaded and identify reuse opportunities
         models_to_load: List[Tuple[str, str, Callable, Dict[str, Any]]] = []

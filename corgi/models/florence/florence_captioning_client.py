@@ -138,13 +138,14 @@ def _load_florence_backend(
             except Exception as e:
                 logger.warning(f"Could not validate device '{device_map}': {e}")
 
-        # Choose model class (prefer Florence2ForConditionalGeneration for florence-community models)
+        # Choose model class
+        # IMPORTANT: Must use AutoModelForCausalLM with trust_remote_code=True to get the
+        # correct model implementation that matches the processor from remote code.
+        # Using native Florence2ForConditionalGeneration causes "image tokens do not match"
+        # errors because the native model expects image tokens but the remote processor
+        # doesn't add them.
         ModelClass = AutoModelForCausalLM
-        if HAS_FLORENCE2 and (
-            "florence-community" in model_id.lower() or "Florence-2" in model_id
-        ):
-            ModelClass = Florence2ForConditionalGeneration
-            logger.info(f"Using Florence2ForConditionalGeneration for {model_id}")
+        logger.info(f"Using AutoModelForCausalLM (remote code) for {model_id}")
 
         # Clear CUDA cache before loading to free up memory
         if torch.cuda.is_available():
@@ -160,12 +161,15 @@ def _load_florence_backend(
         # Load model following official Florence-2 documentation
         # https://huggingface.co/florence-community/Florence-2-base-ft
         # Use device_map directly in from_pretrained (NOT .to() after)
+        # Note: attn_implementation='eager' is used to avoid SDPA compatibility issues
+        # with newer transformers versions (4.57+)
         try:
             model = ModelClass.from_pretrained(
                 model_id,
                 torch_dtype=torch.bfloat16,
                 device_map=device_map,  # Direct device mapping in from_pretrained
                 trust_remote_code=True,
+                attn_implementation='eager',  # Avoid SDPA issues with remote code
             ).eval()
             logger.info(f"Florence-2 Captioning loaded on {device_map}")
         except RuntimeError as e:
@@ -293,14 +297,21 @@ class Florence2CaptioningClient:
                 f"[Florence-2 Captioning] pixel_values: shape={pv.shape if pv is not None else None}, dtype={pv.dtype if pv is not None else None}"
             )
 
-        # Move to device from config
+        # Move to device from config and ensure correct dtype
         device = torch.device(self.config.device)
         inputs = {
-            k: v.to(device) if isinstance(v, torch.Tensor) else v
+            k: (
+                v.to(device=device, dtype=torch.bfloat16)
+                if k == "pixel_values" and isinstance(v, torch.Tensor)
+                else v.to(device) if isinstance(v, torch.Tensor)
+                else v
+            )
             for k, v in inputs.items()
         }
 
-        # Generate with autocast for bfloat16 and nucleus sampling
+        # Generate with autocast for bfloat16
+        # Note: Using greedy decoding (num_beams=1) to avoid compatibility issues
+        # with beam search in remote code + transformers 4.57+
         device_type = "cuda" if "cuda" in self.config.device else "cpu"
         with torch.no_grad(), torch.autocast(
             device_type=device_type, dtype=torch.bfloat16
@@ -309,12 +320,8 @@ class Florence2CaptioningClient:
                 input_ids=inputs["input_ids"],
                 pixel_values=inputs["pixel_values"],
                 max_new_tokens=1024,
-                early_stopping=False,
-                do_sample=True,  # Enable nucleus sampling
-                temperature=0.25,  # Low temperature for accuracy
-                top_p=0.9,  # Nucleus sampling threshold
-                top_k=50,  # Top-k filtering
-                use_cache=True,  # Enable KV cache (tested with transformers >= 4.58)
+                num_beams=1,  # Greedy decoding - avoid beam search issues
+                do_sample=False,  # Greedy
             )
 
         # Decode
@@ -1028,12 +1035,21 @@ class Florence2CaptioningClient:
 
         return ocr_texts, captions
 
+    # Minimum crop size for Florence-2 (to avoid image feature mismatch errors)
+    MIN_CROP_SIZE = 128
+
     @staticmethod
     def _crop_region(
         image: Image.Image,
         bbox: Tuple[float, float, float, float],
+        min_size: int = 128,
     ) -> Image.Image:
-        """Crop image to bounding box region with 25% extension on each side."""
+        """
+        Crop image to bounding box region with 25% extension on each side.
+        
+        Also ensures the crop is at least min_size x min_size pixels,
+        resizing if necessary to avoid Florence-2 image feature errors.
+        """
         x1, y1, x2, y2 = bbox
 
         # Extend bbox by 25% on each dimension (12.5% on each side)
@@ -1062,7 +1078,21 @@ class Florence2CaptioningClient:
         right = max(left + 1, min(right, w))
         bottom = max(top + 1, min(bottom, h))
 
-        return image.crop((left, top, right, bottom))
+        cropped = image.crop((left, top, right, bottom))
+        
+        # Ensure minimum size to avoid Florence-2 image feature errors
+        crop_w, crop_h = cropped.size
+        if crop_w < min_size or crop_h < min_size:
+            # Scale up maintaining aspect ratio, ensuring both dims >= min_size
+            scale = max(min_size / crop_w, min_size / crop_h)
+            new_w = int(crop_w * scale)
+            new_h = int(crop_h * scale)
+            cropped = cropped.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            logger.debug(
+                f"Resized small crop from ({crop_w}, {crop_h}) to ({new_w}, {new_h})"
+            )
+        
+        return cropped
 
 
 __all__ = ["Florence2CaptioningClient"]
