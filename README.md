@@ -143,29 +143,50 @@ docker run -it --gpus all ghcr.io/yourusername/corgi:latest
 
 ## ⚡ Quick Start
 
-### Basic Inference (V2 Pipeline)
+### Unified CLI Inference
 
 ```bash
-# Single image inference
-python inference_v2.py \
-  --image test_image.jpg \
-  --question "What do you see in this image?" \
-  --config configs/qwen_only_v2.yaml \
-  --output results/
+# Default (V2 pipeline, auto-detect from config)
+python inference.py --image test_image.jpg --question "What do you see?" --output results/
+
+# Explicit pipeline version
+python inference.py --pipeline v2 --image test_image.jpg --question "..."
+python inference.py --pipeline v1 --image test_image.jpg --question "..."
+
+# With custom config
+python inference.py --config configs/qwen_florence2_smolvlm2_v2.yaml --image photo.jpg --question "..."
+
+# Batch processing
+python inference.py --batch questions.txt --output batch_results/
 ```
 
-### Launch Gradio UI
+### Unified Gradio UI
 
-#### Option 1: Streaming Chatbot (Recommended ⭐)
+```bash
+# Default (V2 pipeline, standard mode)
+python app_unified.py
+
+# Chatbot mode with streaming (⭐ Recommended)
+python app_unified.py --mode chatbot
+
+# V1 pipeline
+python app_unified.py --pipeline v1
+
+# Custom port and share link
+python app_unified.py --port 7861 --share
+
+# HuggingFace Spaces mode
+python app_unified.py --spaces
+```
+
+#### Chatbot Streaming Mode (⭐ Recommended)
 
 Real-time streaming interface with step-by-step execution:
 
 ```bash
-# Quick launch
-./launch_chatbot.sh
-
-# Or with Python
-python gradio_chatbot_v2.py --config configs/qwen_only_v2.yaml
+python app_unified.py --mode chatbot
+# Or direct launch:
+python gradio_chatbot_v2.py
 # Open browser at http://localhost:7860
 ```
 
@@ -175,15 +196,12 @@ python gradio_chatbot_v2.py --config configs/qwen_only_v2.yaml
 - ✅ Chatbot-style conversation
 - ✅ Live progress updates
 
-See [GRADIO_CHATBOT_V2_README.md](GRADIO_CHATBOT_V2_README.md) for details.
-
-#### Option 2: Standard Interface
+#### Standard Interface
 
 Traditional form-based UI with final results:
 
 ```bash
-# Start standard web interface
-python gradio_app.py --config configs/qwen_only_v2.yaml
+python app_unified.py
 # Open browser at http://localhost:7860
 ```
 
@@ -221,6 +239,38 @@ print(f"Explanation: {result.explanation}")
 print(f"Evidence count: {len(result.evidence)}")
 print(f"Performance: {result.total_duration_ms:.0f}ms")
 ```
+
+### Streaming API
+
+For real-time, progressive display of pipeline results:
+
+```python
+from corgi.core import CoRGIPipelineV2, StreamEventType
+
+# Stream execution with events
+for event in pipeline.run_streaming(image, question):
+    if event.type == StreamEventType.PHASE_START:
+        print(f"Starting: {event.phase}")
+    elif event.type == StreamEventType.STEP:
+        print(f"Step {event.step_index}: {event.data['statement']}")
+    elif event.type == StreamEventType.EVIDENCE:
+        print(f"Evidence: {event.data['evidence_type']}")
+    elif event.type == StreamEventType.ANSWER:
+        print(f"Answer: {event.data['answer']}")
+    elif event.type == StreamEventType.PIPELINE_END:
+        print(f"Total time: {event.data['total_duration_ms']:.0f}ms")
+```
+
+**Available Event Types:**
+- `PIPELINE_START/END` - Lifecycle events
+- `PHASE_START/END` - Phase lifecycle
+- `COT_TEXT` - Chain-of-thought generated
+- `STEP` - Reasoning step with optional bbox
+- `BBOX` - Bounding box from fallback grounding
+- `EVIDENCE` - OCR or caption extracted
+- `ANSWER` - Final answer generated
+- `KEY_EVIDENCE` - Key evidence items
+- `WARNING/ERROR` - Non-fatal warnings or errors
 
 ---
 
@@ -365,56 +415,55 @@ corgi_custom/
 ├── corgi/                          # Main package
 │   ├── core/                       # Core pipeline components
 │   │   ├── pipeline.py             # V1 pipeline (legacy)
-│   │   ├── pipeline_v2.py          # V2 pipeline (current)
+│   │   ├── pipeline_v2.py          # V2 pipeline (current) ⭐
+│   │   ├── streaming.py            # Streaming API ⭐ NEW
 │   │   ├── types.py                # V1 data models
 │   │   ├── types_v2.py             # V2 data models
 │   │   └── config.py               # Configuration schemas
 │   ├── models/                     # VLM clients
 │   │   ├── factory.py              # Composite VLM client factory
 │   │   ├── qwen/                   # Qwen model clients
-│   │   │   ├── qwen_instruct_client.py
-│   │   │   ├── qwen_thinking_client.py
-│   │   │   ├── qwen_grounding_adapter.py
-│   │   │   └── qwen_captioning_adapter.py
 │   │   ├── florence/               # Florence-2 clients
-│   │   │   ├── florence_client.py
-│   │   │   ├── florence_grounding_client.py
-│   │   │   └── florence_captioning_client.py
 │   │   ├── smolvlm/                # SmolVLM2 client
 │   │   ├── fastvlm/                # FastVLM client
 │   │   ├── vintern/                # Vintern client
 │   │   └── composite/              # Composite captioning
-│   │       └── composite_captioning_client.py
 │   └── utils/                      # Utilities
+│       ├── inference_helpers.py    # Shared inference utilities ⭐ NEW
 │       ├── prompts_v2.py           # V2 prompt templates
 │       ├── parsers_v2.py           # V2 response parsers
-│       ├── coordinate_utils.py     # Bbox coordinate handling
-│       ├── image_logger.py         # Image logging
-│       └── output_tracer.py        # Output tracing
+│       └── coordinate_utils.py     # Bbox coordinate handling
 ├── configs/                        # Configuration files
-│   ├── qwen_only_v2.yaml           # Qwen-only V2 config
-│   ├── qwen_florence2_smolvlm2_v2.yaml
-│   └── qwen_thinking.yaml          # V1 config example
+│   ├── README.md                   # Config guide ⭐ NEW
+│   ├── qwen_only_v2.yaml           # Qwen-only V2 config (recommended)
+│   ├── qwen_florence2_smolvlm2_v2.yaml  # Multi-model V2
+│   └── legacy/                     # V1 configs (backward compat)
 ├── docs/                           # Documentation
-│   ├── pipeline_v2/                # V2 architecture docs
-│   │   ├── PIPELINE_V2_SUMMARY.md
-│   │   ├── ARCHITECTURE_REVIEW_V2.md
-│   │   ├── TEST_SESSION_SUMMARY.md
-│   │   └── V2_TEST_PROGRESS.md
-│   ├── guides/                     # User guides
-│   ├── florence2/                  # Florence-2 docs
-│   └── bugfixes/                   # Bug fix logs
-├── inference_v2.py                 # V2 inference script
-├── gradio_chatbot_v2.py            # Gradio UI (streaming chatbot) ⭐
-├── gradio_app.py                   # Gradio UI (standard interface)
-├── gradio_app_html.py              # Gradio UI (HTML version)
-├── launch_chatbot.sh               # Quick launch script for chatbot
-├── GRADIO_CHATBOT_V2_README.md     # Chatbot UI documentation
-├── CHATBOT_UI_SUMMARY.md           # Chatbot implementation summary
+│   ├── QUICK_REFERENCE.md          # Quick usage guide ⭐ NEW
+│   ├── CODEBASE_ANALYSIS.md        # Codebase analysis
+│   ├── REFACTOR_ROADMAP.md         # Refactoring roadmap
+│   └── REFACTOR_PLAN.md            # Refactoring plan
+├── tests/                          # Test suite
+│   ├── integration/                # Integration tests
+│   │   ├── test_real_pipeline.py   # V1 pipeline test
+│   │   └── test_unified_pipeline.py # Unified pipeline test ⭐ NEW
+│   └── unit/                       # Unit tests
+├── archive/                        # Archived legacy files
+│   ├── legacy_entrypoints/         # Old app entrypoints
+│   └── legacy_inference/           # Old inference scripts
+│
+│ ── ENTRYPOINTS (Use These) ────────
+├── inference.py                    # Unified CLI inference (V1+V2) ⭐
+├── app_unified.py                  # Unified Gradio app (all modes) ⭐
+├── gradio_chatbot_v2.py            # Streaming chatbot UI ⭐
+│
+│ ── DEPRECATED (Backward Compat) ───
+├── inference_v2.py                 # (deprecated → use inference.py)
+├── app_v2.py                       # (deprecated → use app_unified.py)
+├── app_qwen_only.py                # (deprecated → use app_unified.py)
+├── app.py                          # (deprecated → use app_unified.py)
+│
 ├── requirements.txt                # Python dependencies
-├── archived_results/               # Archived test results
-├── results_v2_FINAL_RUN/           # Latest inference results
-├── logs/                           # Inference logs
 └── README.md                       # This file
 ```
 
@@ -568,17 +617,20 @@ python inference_v2.py \
 ### Running Tests
 
 ```bash
-# Unit tests
+# All tests
 pytest tests/
 
 # Integration tests
-pytest tests/integration/
+pytest tests/integration/ -v
 
-# V2 pipeline tests
-python -m pytest tests/test_pipeline_v2.py -v
+# Unified pipeline tests (new)
+python tests/integration/test_unified_pipeline.py
 
-# Model-specific tests
-pytest tests/models/test_qwen_instruct.py
+# Or with pytest
+pytest tests/integration/test_unified_pipeline.py -v
+
+# Quick smoke test
+python -c "from corgi.core import CoRGIPipelineV2, StreamEventType; print('OK')"
 ```
 
 ### Code Formatting
