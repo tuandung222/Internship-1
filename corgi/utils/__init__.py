@@ -23,6 +23,14 @@ from .inference_helpers import (
     evidence_to_bbox_list,
 )
 
+from .warm_up import (
+    WarmUpConfig,
+    warm_up_pipeline,
+    warm_up_models_only,
+    verify_cuda_ready,
+    create_dummy_image,
+)
+
 __all__ = [
     # inference_helpers
     "setup_output_dir",
@@ -35,4 +43,10 @@ __all__ = [
     "save_summary_report",
     "pipeline_result_to_dict",
     "evidence_to_bbox_list",
+    # warm_up
+    "WarmUpConfig",
+    "warm_up_pipeline",
+    "warm_up_models_only",
+    "verify_cuda_ready",
+    "create_dummy_image",
 ]

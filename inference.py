@@ -77,33 +77,67 @@ def detect_pipeline_version(config_path: Path) -> str:
     return "v1"
 
 
-def load_pipeline(config_path: Path, pipeline_version: str):
+def load_pipeline(
+    config_path: Path,
+    pipeline_version: str,
+    warm_up: bool = True,
+    sequential_loading: bool = False,
+):
     """
-    Load the appropriate pipeline based on version.
+    Load the appropriate pipeline based on version with optional warm-up.
     
     Args:
         config_path: Path to config YAML file
         pipeline_version: "v1" or "v2"
+        warm_up: Whether to run dummy inference to warm CUDA kernels
+        sequential_loading: Load models sequentially (more stable but slower)
         
     Returns:
         Tuple of (pipeline, pipeline_version)
     """
-    from corgi.core.config import CoRGiConfig
-    from corgi.models.factory import VLMClientFactory
+    from corgi.utils.warm_up import warm_up_pipeline, WarmUpConfig, verify_cuda_ready
     
-    logger.info(f"Loading pipeline {pipeline_version.upper()} from: {config_path}")
+    # Verify CUDA
+    if not verify_cuda_ready():
+        logger.warning("CUDA not available, continuing with CPU")
     
-    config = CoRGiConfig.from_yaml(str(config_path))
-    client = VLMClientFactory.create_from_config(config, parallel_loading=True)
-    
-    if pipeline_version == "v2":
-        from corgi.core.pipeline_v2 import CoRGIPipelineV2
-        pipeline = CoRGIPipelineV2(vlm_client=client)
+    # Use warm-up utility for full initialization
+    if warm_up:
+        warm_up_config = WarmUpConfig(
+            run_dummy_inference=True,
+            dummy_image_size=(224, 224),
+            clear_cache_after=True,
+            sequential_loading=sequential_loading,
+        )
+        
+        use_v2 = pipeline_version == "v2"
+        pipeline = warm_up_pipeline(
+            config_path=config_path,
+            warm_up_config=warm_up_config,
+            use_v2=use_v2,
+        )
     else:
-        from corgi.core.pipeline import CoRGIPipeline
-        pipeline = CoRGIPipeline(vlm_client=client)
+        # Load without warm-up (faster but first inference slower)
+        from corgi.core.config import CoRGiConfig
+        from corgi.models.factory import VLMClientFactory
+        
+        logger.info(f"Loading pipeline {pipeline_version.upper()} from: {config_path}")
+        
+        config = CoRGiConfig.from_yaml(str(config_path))
+        client = VLMClientFactory.create_from_config(
+            config,
+            parallel_loading=not sequential_loading,
+        )
+        
+        if pipeline_version == "v2":
+            from corgi.core.pipeline_v2 import CoRGIPipelineV2
+            pipeline = CoRGIPipelineV2(vlm_client=client)
+        else:
+            from corgi.core.pipeline import CoRGIPipeline
+            pipeline = CoRGIPipeline(vlm_client=client)
+        
+        logger.info(f"✓ Pipeline {pipeline_version.upper()} loaded (no warm-up)")
     
-    logger.info(f"✓ Pipeline {pipeline_version.upper()} loaded successfully")
     return pipeline, pipeline_version
 
 
@@ -569,6 +603,18 @@ Examples:
         help="Maximum regions per step. Default: 5 (V1) or 1 (V2)",
     )
     
+    parser.add_argument(
+        "--no-warm-up",
+        action="store_true",
+        help="Skip model warm-up (faster start but first inference will be slower)",
+    )
+    
+    parser.add_argument(
+        "--sequential-loading",
+        action="store_true",
+        help="Load models sequentially instead of parallel (more stable but slower)",
+    )
+    
     return parser.parse_args()
 
 
@@ -599,9 +645,14 @@ def main():
     logger.info(f"Config: {args.config}")
     logger.info(f"Output: {args.output}")
     
-    # Load pipeline
+    # Load pipeline with warm-up
     try:
-        pipeline, pipeline_version = load_pipeline(args.config, pipeline_version)
+        pipeline, pipeline_version = load_pipeline(
+            config_path=args.config,
+            pipeline_version=pipeline_version,
+            warm_up=not args.no_warm_up,
+            sequential_loading=args.sequential_loading,
+        )
     except Exception as e:
         logger.error(f"Failed to load pipeline: {e}", exc_info=True)
         sys.exit(1)

@@ -52,21 +52,30 @@ def run_traced_inference(
     config_path: Path,
     output_dir: Path,
     max_steps: int = 6,
+    warm_up: bool = True,
+    sequential_loading: bool = False,
 ) -> Dict[str, Any]:
     """
     Run inference with full component tracing.
     
-    Returns trace data with all component inputs/outputs.
+    Args:
+        image_path: Path to input image
+        question: Question to ask
+        config_path: Path to config YAML
+        output_dir: Output directory for trace
+        max_steps: Maximum reasoning steps
+        warm_up: Whether to run warm-up inference
+        sequential_loading: Load models sequentially
+    
+    Returns:
+        Trace data with all component inputs/outputs.
     """
     from corgi.core.config import load_config
     from corgi.core.pipeline_v2 import CoRGIPipelineV2
     from corgi.core.streaming import StreamEventType
     from corgi.models.factory import VLMClientFactory
     from corgi.utils.trace_reporter import TraceReporter
-    
-    # Load config
-    logger.info(f"Loading config: {config_path}")
-    config = load_config(str(config_path))
+    from corgi.utils.warm_up import warm_up_pipeline, WarmUpConfig, verify_cuda_ready
     
     # Create output directory
     output_dir = Path(output_dir)
@@ -93,10 +102,28 @@ def run_traced_inference(
         config_path=str(config_path),
     )
     
-    # Create pipeline
-    logger.info("Loading models...")
-    client = VLMClientFactory.create_from_config(config, parallel_loading=True)
-    pipeline = CoRGIPipelineV2(vlm_client=client)
+    # Load pipeline with warm-up
+    if warm_up and verify_cuda_ready():
+        logger.info("Loading models with warm-up...")
+        warm_up_config = WarmUpConfig(
+            run_dummy_inference=True,
+            dummy_image_size=(224, 224),
+            clear_cache_after=True,
+            sequential_loading=sequential_loading,
+        )
+        pipeline = warm_up_pipeline(
+            config_path=config_path,
+            warm_up_config=warm_up_config,
+            use_v2=True,
+        )
+    else:
+        logger.info("Loading models...")
+        config = load_config(str(config_path))
+        client = VLMClientFactory.create_from_config(
+            config,
+            parallel_loading=not sequential_loading,
+        )
+        pipeline = CoRGIPipelineV2(vlm_client=client)
     
     # Run pipeline with streaming to capture all events
     logger.info("Running pipeline...")
@@ -345,6 +372,18 @@ Examples:
         help="Open HTML report in browser after inference",
     )
     
+    parser.add_argument(
+        "--no-warm-up",
+        action="store_true",
+        help="Skip model warm-up (faster start but first inference will be slower)",
+    )
+    
+    parser.add_argument(
+        "--sequential-loading",
+        action="store_true",
+        help="Load models sequentially instead of parallel (more stable but slower)",
+    )
+    
     args = parser.parse_args()
     
     # Validate inputs
@@ -374,6 +413,8 @@ Examples:
             config_path=args.config,
             output_dir=args.output,
             max_steps=args.max_steps,
+            warm_up=not args.no_warm_up,
+            sequential_loading=args.sequential_loading,
         )
         
         print()

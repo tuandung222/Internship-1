@@ -270,7 +270,69 @@ Examples:
         help="Logging level. Default: INFO",
     )
     
+    parser.add_argument(
+        "--no-warm-up",
+        action="store_true",
+        help="Skip model warm-up (faster start but first inference will be slower)",
+    )
+    
+    parser.add_argument(
+        "--sequential-loading",
+        action="store_true",
+        help="Load models sequentially instead of parallel (more stable but slower)",
+    )
+    
     return parser.parse_args()
+
+
+def warm_up_models(
+    config_path: Path,
+    pipeline_version: str,
+    logger,
+    sequential_loading: bool = False,
+) -> None:
+    """
+    Warm up models on CUDA before launching the app.
+    
+    This ensures models are loaded and ready, avoiding cold start latency.
+    
+    Args:
+        config_path: Path to config file
+        pipeline_version: "v1" or "v2"
+        logger: Logger instance
+        sequential_loading: Load models sequentially (more stable)
+    """
+    from corgi.utils.warm_up import warm_up_pipeline, WarmUpConfig, verify_cuda_ready
+    
+    # Verify CUDA first
+    if not verify_cuda_ready():
+        logger.warning("CUDA not available, skipping warm-up")
+        return
+    
+    # Configure warm-up
+    warm_up_config = WarmUpConfig(
+        run_dummy_inference=True,  # Run dummy inference to warm CUDA kernels
+        dummy_image_size=(224, 224),  # Small image for fast warm-up
+        clear_cache_after=True,
+        sequential_loading=sequential_loading,
+    )
+    
+    try:
+        # Warm up the pipeline
+        use_v2 = pipeline_version == "v2"
+        _pipeline = warm_up_pipeline(
+            config_path=config_path,
+            warm_up_config=warm_up_config,
+            use_v2=use_v2,
+        )
+        
+        # Store in global cache so Gradio can reuse
+        # (The gradio_app module has its own caching mechanism)
+        logger.info("✓ Models warmed up and ready for inference")
+        
+    except Exception as e:
+        logger.error(f"Warm-up failed: {e}")
+        logger.warning("Continuing without warm-up (first inference will be slower)")
 
 
 def main():
@@ -299,6 +361,23 @@ def main():
     except FileNotFoundError as e:
         logger.error(str(e))
         sys.exit(1)
+    
+    # =========================================================================
+    # WARM UP MODELS ON CUDA
+    # =========================================================================
+    if not args.no_warm_up:
+        logger.info("")
+        logger.info("Warming up models on CUDA...")
+        warm_up_models(
+            config_path=config_path,
+            pipeline_version=pipeline_version,
+            logger=logger,
+            sequential_loading=args.sequential_loading,
+        )
+        logger.info("")
+    else:
+        logger.info("Skipping model warm-up (--no-warm-up)")
+        logger.info("")
     
     # Build app
     logger.info(f"Building {args.mode} UI...")
