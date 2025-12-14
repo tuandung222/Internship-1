@@ -1,0 +1,59 @@
+# Custom V2 Pipeline Configuration
+# Qwen (reasoning/grounding) + Florence-2 (OCR) + SmolVLM2 (captioning)
+
+# === Phase 1+2: Reasoning + Grounding (MERGED) ===
+reasoning:
+  model:
+    model_type: qwen_instruct
+    # Chọn model size phù hợp với VRAM
+    # model_id: Qwen/Qwen3-VL-2B-Instruct   # ~6GB VRAM
+    model_id: Qwen/Qwen3-VL-4B-Instruct     # ~10GB VRAM
+    # model_id: Qwen/Qwen3-VL-8B-Instruct   # ~18GB VRAM
+    device: cuda:0           # GPU cho reasoning
+    torch_dtype: bfloat16    # hoặc float16
+    use_v2_prompt: true      # Dùng V2 prompt format
+    use_optimized_prompt: true
+
+# Grounding tái sử dụng reasoning model (không cần load thêm)
+grounding:
+  reuse_reasoning: true
+
+# === Phase 3: Evidence Extraction (Composite) ===
+captioning:
+  model:
+    model_type: composite    # Smart routing: OCR hoặc Caption
+    device: cuda:0
+
+  # OCR model (cho text evidence)
+  ocr:
+    model:
+      model_type: florence2
+      # Chọn Florence-2 variant
+      model_id: microsoft/Florence-2-base-ft      # Nhẹ, nhanh
+      # model_id: florence-community/Florence-2-large-ft  # Chính xác hơn
+      device: cuda:0          # Có thể dùng GPU khác: cuda:1
+      torch_dtype: float16
+
+  # Caption model (cho object evidence)
+  caption:
+    model:
+      model_type: smolvlm2
+      model_id: HuggingFaceTB/SmolVLM2-500M-Video-Instruct   # Nhẹ
+      # model_id: HuggingFaceTB/SmolVLM2-1.7B-Instruct       # Chính xác hơn
+      device: cuda:0          # Có thể dùng GPU khác: cuda:1
+      torch_dtype: float16
+
+# === Phase 4: Synthesis ===
+synthesis:
+  reuse_reasoning: true      # Tái sử dụng Qwen từ Phase 1
+
+# === Pipeline Settings ===
+pipeline:
+  max_reasoning_steps: 6     # Số bước reasoning tối đa
+  max_regions_per_step: 1    # Số vùng tối đa mỗi bước
+  use_v2: true               # BẮT BUỘC cho V2 pipeline
+
+# === NMS Settings ===
+nms:
+  enabled: true
+  iou_threshold: 0.5

@@ -530,8 +530,8 @@ Examples:
     parser.add_argument(
         "--config",
         type=Path,
-        default=Path("configs/qwen_only_v2.yaml"),
-        help="Path to pipeline config YAML. Default: configs/qwen_only_v2.yaml",
+        default=Path("configs/qwen_florence2_smolvlm2_v2.yaml"),
+        help="Path to pipeline config YAML. Default: configs/qwen_florence2_smolvlm2_v2.yaml (multi-model V2)",
     )
     
     # Output options

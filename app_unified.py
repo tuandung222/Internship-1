@@ -59,14 +59,16 @@ def configure_logging(level: str = "INFO") -> logging.Logger:
 CONFIG_DIR = Path(__file__).parent / "configs"
 
 # Recommended configs for each pipeline version
+# Default: Multi-model V2 (Qwen + Florence-2 + SmolVLM2)
 DEFAULT_CONFIGS = {
-    "v2": CONFIG_DIR / "qwen_only_v2.yaml",
+    "v2": CONFIG_DIR / "qwen_florence2_smolvlm2_v2.yaml",
     "v1": CONFIG_DIR / "legacy" / "qwen_only.yaml",
 }
 
 # Fallback configs (in priority order)
 FALLBACK_CONFIGS = [
-    CONFIG_DIR / "qwen_only_v2.yaml",
+    CONFIG_DIR / "qwen_florence2_smolvlm2_v2.yaml",  # Multi-model V2 (preferred)
+    CONFIG_DIR / "qwen_only_v2.yaml",                 # Single-model V2
     CONFIG_DIR / "default_v2.yaml",
     CONFIG_DIR / "qwen_only.yaml",
 ]
