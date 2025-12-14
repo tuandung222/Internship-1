@@ -1121,36 +1121,61 @@ class VLMClientFactory:
         else:
             logger.info("Synthesis will reuse reasoning model (reuse_reasoning=true)")
 
-        # Load models (parallel or sequential)
+        # Load models (parallel or sequential with fallback)
         loaded_models: Dict[str, Any] = {}
+        use_parallel = parallel_loading and len(models_to_load) > 1
+        parallel_failed = False
 
-        if parallel_loading and len(models_to_load) > 1:
+        if use_parallel:
             model_names = [name for name, _, _, _ in models_to_load]
             logger.info(
                 f"Loading {len(models_to_load)} models in parallel: {model_names}"
             )
-            logger.info(
-                "✓ Qwen3-VL and Vintern will load simultaneously for optimal startup time"
-            )
-            with ThreadPoolExecutor(
-                max_workers=min(4, len(models_to_load))
-            ) as executor:
-                futures = {
-                    executor.submit(load_fn): (name, model_type)
-                    for name, model_type, load_fn, kwargs in models_to_load
-                }
+            
+            try:
+                with ThreadPoolExecutor(
+                    max_workers=min(4, len(models_to_load))
+                ) as executor:
+                    futures = {
+                        executor.submit(load_fn): (name, model_type)
+                        for name, model_type, load_fn, kwargs in models_to_load
+                    }
 
-                for future in as_completed(futures):
-                    name, model_type = futures[future]
-                    try:
-                        model = future.result()
-                        loaded_models[name] = model
-                        logger.info(f"✓ {name} model loaded")
-                    except Exception as e:
-                        logger.error(f"Failed to load {name} model: {e}", exc_info=True)
-                        raise
-        else:
-            logger.info(f"Loading {len(models_to_load)} models sequentially...")
+                    for future in as_completed(futures):
+                        name, model_type = futures[future]
+                        try:
+                            model = future.result()
+                            loaded_models[name] = model
+                            logger.info(f"✓ {name} model loaded (parallel)")
+                        except NotImplementedError as e:
+                            # "meta tensor" error - need to fallback to sequential
+                            if "meta tensor" in str(e).lower():
+                                logger.warning(
+                                    f"Meta tensor error loading {name}, falling back to sequential"
+                                )
+                                parallel_failed = True
+                                break
+                            raise
+                        except Exception as e:
+                            logger.error(f"Failed to load {name} model: {e}", exc_info=True)
+                            raise
+            except Exception as e:
+                if "meta tensor" in str(e).lower():
+                    parallel_failed = True
+                    logger.warning(
+                        f"Parallel loading failed with meta tensor error, falling back to sequential"
+                    )
+                else:
+                    raise
+
+        # Sequential loading (primary or fallback)
+        if not use_parallel or parallel_failed:
+            if parallel_failed:
+                logger.info("Retrying with sequential loading...")
+                loaded_models.clear()
+            else:
+                logger.info(f"Loading {len(models_to_load)} models sequentially...")
+            
             for name, model_type, load_fn, kwargs in models_to_load:
                 try:
                     model = load_fn()
@@ -1161,9 +1186,8 @@ class VLMClientFactory:
                     raise
 
         load_time = time.time() - load_start
-        logger.info(
-            f"All models loaded in {load_time:.2f}s ({'parallel' if parallel_loading and len(models_to_load) > 1 else 'sequential'})"
-        )
+        load_mode = "parallel" if use_parallel and not parallel_failed else "sequential"
+        logger.info(f"All models loaded in {load_time:.2f}s ({load_mode})")
 
         # Now construct the final models with adapters and loggers
         # Reasoning model
