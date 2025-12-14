@@ -42,7 +42,49 @@
 
 ## 🏗️ Architecture
 
-### Pipeline V2 Flow
+### Pipeline V2 Flow (Mermaid)
+
+```mermaid
+flowchart TD
+    subgraph INPUT
+        A[🖼️ Image + ❓ Question]
+    end
+
+    subgraph PHASE_1_2["Phase 1+2: Reasoning + Grounding (Merged)"]
+        B[🧠 Qwen3-VL-2B-Instruct]
+        B --> |"Chain-of-Thought"| C["📝 Structured Steps<br/>• statement<br/>• need_object_captioning<br/>• need_text_ocr<br/>• bbox [x1,y1,x2,y2]"]
+    end
+
+    subgraph PHASE_3["Phase 3: Smart Evidence Routing"]
+        D{Evidence Type?}
+        E[🎨 SmolVLM2<br/>Object Caption]
+        F[📄 Florence-2<br/>Text OCR]
+        D -->|need_object_captioning| E
+        D -->|need_text_ocr| F
+    end
+
+    subgraph PHASE_4["Phase 4: Answer Synthesis"]
+        G[🧠 Qwen3-VL<br/>reused from Phase 1]
+    end
+
+    subgraph OUTPUT
+        H["✅ Answer + Explanation<br/>📊 Evidence with BBoxes<br/>📈 trace.json (optional)"]
+    end
+
+    A --> B
+    C --> D
+    E --> G
+    F --> G
+    G --> H
+
+    style B fill:#e1f5fe
+    style E fill:#fff3e0
+    style F fill:#f3e5f5
+    style G fill:#e1f5fe
+    style H fill:#e8f5e9
+```
+
+### Pipeline Flow (ASCII)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -51,7 +93,7 @@
                         │
         ┌───────────────▼────────────────┐
         │  Phase 1+2 MERGED              │
-        │  Qwen3-VL-4B-Instruct          │
+        │  Qwen3-VL-2B-Instruct          │
         │  ┌──────────────────────────┐  │
         │  │ <THINKING>               │  │
         │  │ Chain-of-thought...      │  │
@@ -84,7 +126,7 @@
                         │
         ┌───────────────▼────────────────┐
         │  Phase 4: Answer Synthesis     │
-        │  Qwen3-VL-4B-Instruct          │
+        │  Qwen3-VL-2B-Instruct          │
         │  (reused from Phase 1)         │
         └───────────────┬────────────────┘
                         │
@@ -158,6 +200,30 @@ python inference.py --config configs/qwen_florence2_smolvlm2_v2.yaml --image pho
 
 # Batch processing
 python inference.py --batch questions.txt --output batch_results/
+```
+
+### Traced Inference (Debugging)
+
+Full component tracing with HTML report for debugging:
+
+```bash
+# Run with full tracing
+python inference_traced.py --image photo.jpg --question "What is this?" --output results/trace
+
+# Open HTML report automatically
+python inference_traced.py --image photo.jpg --question "..." --output results/trace --open-report
+```
+
+**Output structure:**
+```
+results/trace/
+├── trace.json           # Complete trace data (all component I/O)
+├── trace_report.html    # Visual HTML report 🌐
+├── summary.txt          # Quick summary
+├── images/original.jpg  # Input image
+├── crops/*.jpg          # Cropped input regions per component
+├── visualizations/*.jpg # Images with bboxes drawn
+└── prompts/*.txt        # Component prompts
 ```
 
 ### Unified Gradio UI
@@ -430,6 +496,7 @@ corgi_custom/
 │   │   └── composite/              # Composite captioning
 │   └── utils/                      # Utilities
 │       ├── inference_helpers.py    # Shared inference utilities ⭐ NEW
+│       ├── trace_reporter.py       # Trace reporter for debugging ⭐ NEW
 │       ├── prompts_v2.py           # V2 prompt templates
 │       ├── parsers_v2.py           # V2 response parsers
 │       └── coordinate_utils.py     # Bbox coordinate handling
@@ -454,6 +521,7 @@ corgi_custom/
 │
 │ ── ENTRYPOINTS (Use These) ────────
 ├── inference.py                    # Unified CLI inference (V1+V2) ⭐
+├── inference_traced.py             # Traced inference with HTML report ⭐ NEW
 ├── app_unified.py                  # Unified Gradio app (all modes) ⭐
 ├── gradio_chatbot_v2.py            # Streaming chatbot UI ⭐
 │

@@ -6,7 +6,7 @@ echo "========================================"
 echo ""
 
 # Check if config is provided (default: multi-model setup)
-CONFIG="${1:-configs/default_v2.yaml}"
+CONFIG="${1:-configs/qwen_florence2_smolvlm2_v2.yaml}"
 PORT="${2:-7860}"
 
 echo "📄 Config: $CONFIG"
