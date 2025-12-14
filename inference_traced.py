@@ -164,16 +164,18 @@ def run_traced_inference(
             
             # Determine which model was used
             if ev_type == "text":
-                model_id = getattr(config.captioning, "ocr", None)
-                if model_id and hasattr(model_id, "model"):
-                    model_id = model_id.model.model_id
+                # OCR model: config.captioning.ocr.model.model_id
+                ocr_config = getattr(config.captioning, "ocr", None)
+                if ocr_config and hasattr(ocr_config, "model") and ocr_config.model:
+                    model_id = ocr_config.model.model_id
                 else:
                     model_id = "Florence-2 OCR"
                 component_name = f"ocr_step_{step_idx}"
             else:
-                model_id = getattr(config.captioning, "caption", None)
-                if model_id and hasattr(model_id, "model"):
-                    model_id = model_id.model.model_id
+                # Caption model: config.captioning.caption.model.model_id
+                caption_config = getattr(config.captioning, "caption", None)
+                if caption_config and hasattr(caption_config, "model") and caption_config.model:
+                    model_id = caption_config.model.model_id
                 else:
                     model_id = "SmolVLM2 Caption"
                 component_name = f"caption_step_{step_idx}"
