@@ -9,6 +9,7 @@
 - **Smart Evidence Routing**: Automatic classification into object captioning or OCR (not both)
 - **Integrated Grounding**: Bounding boxes from reasoning phase (optional fallback grounding)
 - **Memory Efficient**: 67% less VRAM with `reuse_reasoning: true`
+- **UI Trace View**: Scrollable “raw I/O per stage” (reasoning JSON, synthesis input/output)
 
 ### Core Capabilities
 - **Modular Architecture**: Mix and match different VLMs for each stage
@@ -31,7 +32,6 @@
 - [Documentation](#documentation)
 - [Performance](#performance)
 - [Examples](#examples)
-- [Contributing](#contributing)
 
 ---
 
@@ -101,7 +101,7 @@ flowchart TD
 ```bash
 # Clone repository
 git clone https://github.com/tuandung222/Internship-1.git
-cd corgi_implementation/corgi_custom
+cd Internship-1
 
 # Create virtual environment
 python -m venv venv
@@ -111,18 +111,8 @@ source venv/bin/activate  # Linux/Mac
 # Install dependencies
 pip install -r requirements.txt
 
-# Install development version of transformers (for Qwen3-VL support)
-pip install git+https://github.com/huggingface/transformers.git
-
-# Install additional packages
-pip install timm  # For Florence-2
-```
-
-### Method 2: Docker (Coming Soon)
-
-```bash
-docker pull ghcr.io/yourusername/corgi:latest
-docker run -it --gpus all ghcr.io/yourusername/corgi:latest
+# If Qwen3-VL is not supported by your environment, upgrade transformers:
+# pip install -U "transformers>=4.48" "accelerate>=0.34"
 ```
 
 ---
@@ -189,6 +179,11 @@ python app_unified.py --port 7861 --share
 python app_unified.py --spaces
 ```
 
+In the standard UI, open **Trace (Raw I/O per stage — scroll down)** to inspect:
+- Reasoning prompt + raw model output
+- Parsed structured reasoning JSON
+- Synthesis input JSON + synthesis prompt + raw synthesis output
+
 #### Chatbot Streaming Mode
 
 Real-time streaming interface with step-by-step execution:
@@ -208,7 +203,7 @@ python gradio_chatbot_v2.py
 
 #### Standard Interface
 
-Traditional form-based UI with final results:
+Form-based UI with a scrollable, step-by-step trace:
 
 ```bash
 python app_unified.py
@@ -478,44 +473,18 @@ corgi_custom/
 
 ## Documentation
 
-### Core Documentation
+Available documentation in `docs/`:
 
 | Document | Description |
 |----------|-------------|
-| [PIPELINE_V2_SUMMARY.md](docs/pipeline_v2/PIPELINE_V2_SUMMARY.md) | Complete V2 architecture overview |
-| [ARCHITECTURE_REVIEW_V2.md](docs/pipeline_v2/ARCHITECTURE_REVIEW_V2.md) | V1 vs V2 detailed comparison |
-| [TEST_SESSION_SUMMARY.md](docs/pipeline_v2/TEST_SESSION_SUMMARY.md) | Testing process and fixes |
-| [V2_TEST_PROGRESS.md](docs/pipeline_v2/V2_TEST_PROGRESS.md) | Step-by-step test progress |
-
-### Quick References
-
-- **[Quick Start Guide](docs/guides/QUICK_START.md)** - Get started in 30 seconds
-- **[Usage Guide](docs/USAGE_GUIDE.md)** - Comprehensive usage instructions
-- **[Configuration Guide](docs/guides/CONFIGURATION.md)** - All configuration options
-- **[Model Registry](docs/guides/MODEL_REGISTRY.md)** - Supported models and benchmarks
-
-### Advanced Topics
-
-- **[Custom Models](docs/guides/CUSTOM_MODELS.md)** - Integrate your own VLMs
-- **[Optimization Guide](docs/OPTIMIZATION_IMPLEMENTATION_SUMMARY.md)** - Performance tuning
-- **[Deployment](docs/DEPLOY_NOW.md)** - Deploy to HuggingFace Spaces
+| [QUICK_REFERENCE.md](docs/QUICK_REFERENCE.md) | Quick usage reference |
+| [CODEBASE_ANALYSIS.md](docs/CODEBASE_ANALYSIS.md) | Codebase analysis notes |
+| [REFACTOR_PLAN.md](docs/REFACTOR_PLAN.md) | Refactor plan |
+| [REFACTOR_ROADMAP.md](docs/REFACTOR_ROADMAP.md) | Refactor roadmap |
 
 ---
 
 ## Performance
-
-### Benchmark (V2 Pipeline, Qwen3-VL-4B-Instruct)
-
-**Hardware**: NVIDIA A100 (40GB)
-
-| Metric | Value | Details |
-|--------|-------|---------|
-| **Total Latency** | 41.7s | End-to-end inference |
-| **Phase 1+2** | 30.4s | Reasoning + Grounding merged |
-| **Phase 3** | 0.1s | 6 parallel caption calls |
-| **Phase 4** | 11.3s | Answer synthesis |
-| **Memory Usage** | 10GB VRAM | Single model reused 3x |
-| **Bbox Success** | 100% | 6/6 bboxes from Phase 1 |
 
 ### Optimization Tips
 
@@ -540,7 +509,7 @@ corgi_custom/
 
 4. **Batch Processing**:
    ```bash
-   python inference_v2.py --batch-file questions.jsonl
+   python inference.py --batch questions.txt --output batch_results/
    ```
 
 ---
@@ -550,7 +519,7 @@ corgi_custom/
 ### Example 1: Document Understanding
 
 ```bash
-python inference_v2.py \
+python inference.py \
   --image invoice.pdf \
   --question "What is the total amount?" \
   --config configs/qwen_only_v2.yaml
@@ -577,7 +546,7 @@ python inference_v2.py \
 ### Example 2: Scene Understanding
 
 ```bash
-python inference_v2.py \
+python inference.py \
   --image street.jpg \
   --question "How many yellow taxis are visible?" \
   --config configs/qwen_only_v2.yaml
@@ -604,7 +573,7 @@ python inference_v2.py \
 ### Example 3: Multi-Step Reasoning
 
 ```bash
-python inference_v2.py \
+python inference.py \
   --image chart.png \
   --question "Which category had the highest growth rate?" \
   --config configs/qwen_only_v2.yaml
@@ -661,27 +630,7 @@ mypy corgi/
 4. Create YAML config in `configs/`
 5. Add tests in `tests/models/`
 
-See [Custom Models Guide](docs/guides/CUSTOM_MODELS.md) for details.
-
----
-
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-### Areas for Contribution
-
-- **New Models**: Integrate additional VLMs (LLaVA, CogVLM, etc.)
-- **Optimizations**: Performance improvements, memory reduction
-- **Features**: Batch processing, caching, multi-GPU support
-- **Documentation**: Tutorials, examples, translations
-- **Testing**: Unit tests, integration tests, benchmarks
-
----
-
-## License
-
-This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) file for details.
+See `corgi/models/` and `corgi/models/factory.py` for examples of how new model clients are integrated.
 
 ---
 
