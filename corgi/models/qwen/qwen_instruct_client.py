@@ -435,6 +435,7 @@ class Qwen3VLInstructClient:
         question: str,
         steps: List,
         evidences: List,
+        max_new_tokens: Optional[int] = None,
     ) -> Tuple[str, List, Optional[str]]:
         """
         Synthesize final answer from evidences (V2 pipeline).
@@ -505,11 +506,21 @@ Use up to 3 key evidence items. Respond with JSON only."""
         inputs = inputs.to(self._model.device)
         
         # Generate
+        effective_max_new_tokens = 1536
+        if max_new_tokens is not None:
+            try:
+                candidate = int(max_new_tokens)
+                if candidate > 0:
+                    effective_max_new_tokens = candidate
+            except Exception:
+                pass
+
+        use_cache = True if self.config.use_cache is None else bool(self.config.use_cache)
         generated_ids = self._model.generate(
             **inputs,
-            max_new_tokens=512,
+            max_new_tokens=effective_max_new_tokens,
             do_sample=False,
-        use_cache=True,  # ✅ Enable KV cache for 30-40% speedup
+            use_cache=use_cache,
         )
         
         # Decode

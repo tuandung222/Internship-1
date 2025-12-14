@@ -289,8 +289,21 @@ class CompositeVLMClient:
         """
         # Delegate to synthesis model
         if hasattr(self.synthesis, "synthesize_answer"):
+            kwargs: Dict[str, Any] = {}
+            try:
+                import inspect
+
+                signature = inspect.signature(self.synthesis.synthesize_answer)
+                if "max_new_tokens" in signature.parameters:
+                    max_new_tokens = getattr(self.config.synthesis, "max_new_tokens", None)
+                    if isinstance(max_new_tokens, int) and max_new_tokens > 0:
+                        kwargs["max_new_tokens"] = max_new_tokens
+            except Exception:
+                # Never fail synthesis due to optional kwargs probing.
+                kwargs = {}
+
             answer, key_evidence, explanation = self.synthesis.synthesize_answer(
-                image, question, steps, evidences
+                image, question, steps, evidences, **kwargs
             )
 
             # Copy prompt/response logs from synthesis model for UI/debugging.

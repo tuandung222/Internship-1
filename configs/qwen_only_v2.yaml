@@ -27,6 +27,7 @@ captioning:
 # Phase 4: Synthesis
 synthesis:
   reuse_reasoning: true
+  max_new_tokens: 1536  # Increased for key_evidence JSON output
 
 # Pipeline V2 settings
 pipeline:
