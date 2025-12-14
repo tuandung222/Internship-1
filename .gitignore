@@ -72,3 +72,7 @@ Thumbs.db
 
 Dolphin/
 _hf_space/
+
+# Trace results
+results/
+*.log
