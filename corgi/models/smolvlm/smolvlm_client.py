@@ -7,7 +7,7 @@ This is a smaller, faster alternative to FastVLM with better instruction followi
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import logging
 import time
 import os
@@ -18,9 +18,17 @@ from transformers import AutoProcessor, AutoModelForImageTextToText
 
 from ...core.config import ModelConfig
 from ..registry import ModelRegistry
-from ...utils.prompts import FASTVLM_CAPTIONING_PROMPT
 
 logger = logging.getLogger(__name__)
+
+SMOLVLM2_REGION_CAPTION_PROMPT = (
+    "Describe this image region in 20–30 words, as a single sentence. "
+    "Be specific about the main subject(s), key attributes (color/shape), and any action. "
+    "Do not repeat yourself. Do not add extra commentary."
+)
+
+_WORD_LIMIT_MIN = 20
+_WORD_LIMIT_MAX = 30
 
 try:
     import spaces  # type: ignore
@@ -95,27 +103,30 @@ def _load_smolvlm2_backend(
         # Load model
         device_map = {"": target_device} if target_device != "cpu" else None
 
+        def _load_model(extra_kwargs: dict):
+            base_kwargs = {
+                "device_map": device_map,
+                "trust_remote_code": True,
+            }
+            try:
+                return AutoModelForImageTextToText.from_pretrained(
+                    model_id, dtype=torch_dtype, **base_kwargs, **extra_kwargs
+                ).eval()
+            except TypeError:
+                return AutoModelForImageTextToText.from_pretrained(
+                    model_id, torch_dtype=torch_dtype, **base_kwargs, **extra_kwargs
+                ).eval()
+
         try:
             # Try with flash attention 2 first
-            model = AutoModelForImageTextToText.from_pretrained(
-                model_id,
-                torch_dtype=torch_dtype,
-                device_map=device_map,
-                _attn_implementation="flash_attention_2",
-                trust_remote_code=True,
-            ).eval()
+            model = _load_model({"_attn_implementation": "flash_attention_2"})
             logger.info("✓ SmolVLM2 loaded with Flash Attention 2")
         except Exception as e:
             logger.warning(
                 f"Flash Attention 2 not available ({e}), using default attention"
             )
             try:
-                model = AutoModelForImageTextToText.from_pretrained(
-                    model_id,
-                    torch_dtype=torch_dtype,
-                    device_map=device_map,
-                    trust_remote_code=True,
-                ).eval()
+                model = _load_model({})
                 logger.info("✓ SmolVLM2 loaded with default attention")
             except Exception as e2:
                 logger.error(f"Failed to load SmolVLM2 model: {e2}", exc_info=True)
@@ -253,6 +264,8 @@ class SmolVLM2CaptioningClient:
                     **inputs,
                     max_new_tokens=max_new_tokens,
                     do_sample=False,  # Deterministic for consistent results
+                    repetition_penalty=1.05,
+                    no_repeat_ngram_size=4,
                 )
 
             # Decode
@@ -270,6 +283,92 @@ class SmolVLM2CaptioningClient:
         except Exception as e:
             logger.error(f"SmolVLM2 inference failed: {e}", exc_info=True)
             return ""
+
+    @_gpu_decorator(duration=120)
+    def _chat_batch(
+        self,
+        images: List[Image.Image],
+        prompt: str,
+        max_new_tokens: int,
+    ) -> List[str]:
+        if not images:
+            return []
+
+        messages_batch = [
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "image", "url": img},
+                        {"type": "text", "text": prompt},
+                    ],
+                }
+            ]
+            for img in images
+        ]
+
+        texts = [
+            self._processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+            for messages in messages_batch
+        ]
+
+        inputs = self._processor(
+            text=texts,
+            images=images,
+            return_tensors="pt",
+            padding=True,
+        ).to(self._model.device, dtype=self._model.dtype)
+
+        with torch.no_grad():
+            outputs = self._model.generate(
+                **inputs,
+                max_new_tokens=max_new_tokens,
+                do_sample=False,
+                repetition_penalty=1.05,
+                no_repeat_ngram_size=4,
+            )
+
+        generated_ids = [
+            output_ids[len(input_ids) :]
+            for input_ids, output_ids in zip(inputs["input_ids"], outputs)
+        ]
+        decoded = self._processor.batch_decode(
+            generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )
+
+        cleaned: List[str] = []
+        for text in decoded:
+            candidate = text
+            if "Assistant:" in candidate:
+                candidate = candidate.split("Assistant:", 1)[1].strip()
+            cleaned.append(candidate.strip())
+        return cleaned
+
+    @staticmethod
+    def _postprocess_caption_text(text: str) -> str:
+        if not text:
+            return ""
+        cleaned = " ".join(text.replace("\n", " ").split()).strip()
+        if not cleaned:
+            return ""
+
+        # Keep only the first sentence if the model becomes verbose.
+        for sep in (". ", "。", "！", "?", "؟"):
+            if sep in cleaned:
+                cleaned = cleaned.split(sep, 1)[0].strip()
+                break
+
+        words = cleaned.split()
+        if len(words) > _WORD_LIMIT_MAX:
+            cleaned = " ".join(words[:_WORD_LIMIT_MAX]).strip()
+            if cleaned and cleaned[-1] not in ".!?":
+                cleaned += "."
+
+        return cleaned
 
     @_gpu_decorator(duration=120)
     def caption_region(
@@ -344,13 +443,13 @@ Provide a detailed analysis:
 4. Explain your reasoning"""
                 max_tokens = 256  # More tokens for detailed VQA
             else:
-                # Captioning mode - super detailed
-                prompt = FASTVLM_CAPTIONING_PROMPT
-                max_tokens = 512  # More tokens for detailed captioning
+                # Captioning mode - concise (20-30 words)
+                prompt = SMOLVLM2_REGION_CAPTION_PROMPT
+                max_tokens = 64  # Keep short to enforce word limit
 
             # Run inference with appropriate token limit
             raw_output = self._chat(cropped, prompt, max_new_tokens=max_tokens)
-            caption = raw_output.strip() if raw_output else ""
+            caption = self._postprocess_caption_text(raw_output)
 
             # Log result
             logger.info(
@@ -395,6 +494,49 @@ Provide a detailed analysis:
         except Exception as e:
             logger.error(f"SmolVLM2 captioning failed: {e}", exc_info=True)
             return ""
+
+    @_gpu_decorator(duration=120)
+    def caption_regions_batch(
+        self,
+        image: Image.Image,
+        bboxes: List[Tuple[float, float, float, float]],
+        step_index: int,
+        statement: Optional[str] = None,
+    ) -> List[str]:
+        """
+        Batch captioning for multiple regions from the same image.
+
+        Used by the V2 pipeline when batch_captioning is enabled.
+        """
+        # If statement-based VQA is requested, keep behavior identical to per-region calls.
+        if statement:
+            return [
+                self.caption_region(image, bbox, step_index, i, statement=statement)
+                for i, bbox in enumerate(bboxes)
+            ]
+
+        start_time = time.time()
+        if not bboxes:
+            return []
+
+        # Crop all regions first (cheap) then run a single batched generate.
+        crops: List[Image.Image] = []
+        for bbox in bboxes:
+            crops.append(self._crop_region(image, bbox))
+
+        raw_outputs = self._chat_batch(
+            crops,
+            SMOLVLM2_REGION_CAPTION_PROMPT,
+            max_new_tokens=64,
+        )
+        captions = [self._postprocess_caption_text(text) for text in raw_outputs]
+
+        duration_ms = (time.time() - start_time) * 1000.0
+        logger.info(
+            f"[SmolVLM2] Batch captioning completed: step={step_index}, regions={len(bboxes)}, "
+            f"{duration_ms:.2f}ms total ({duration_ms/len(bboxes):.2f}ms/region)"
+        )
+        return captions
 
 
 def _load_smolvlm2_backend_in_gpu_context(config: ModelConfig):

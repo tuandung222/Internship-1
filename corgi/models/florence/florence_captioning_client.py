@@ -163,12 +163,20 @@ def _load_florence_backend(
             
             # Load with dtype='auto' and move to device with .cuda()
             # attn_implementation='eager' bypasses SDPA compatibility check in remote code
-            model = ModelClass.from_pretrained(
-                model_id,
-                torch_dtype='auto',  # Let model decide dtype
-                trust_remote_code=True,
-                attn_implementation='eager',  # Bypass SDPA check in buggy remote code
-            ).eval().cuda(device_id)
+            try:
+                model = ModelClass.from_pretrained(
+                    model_id,
+                    dtype="auto",  # transformers >= 4.48
+                    trust_remote_code=True,
+                    attn_implementation="eager",  # Bypass SDPA check in buggy remote code
+                ).eval().cuda(device_id)
+            except TypeError:
+                model = ModelClass.from_pretrained(
+                    model_id,
+                    torch_dtype="auto",  # backward compatibility
+                    trust_remote_code=True,
+                    attn_implementation="eager",  # Bypass SDPA check in buggy remote code
+                ).eval().cuda(device_id)
             
             logger.info(f"Florence-2 Captioning loaded on cuda:{device_id}")
         except RuntimeError as e:

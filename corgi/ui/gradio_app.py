@@ -649,221 +649,230 @@ def build_demo(
     except Exception as exc:
         logger.warning(f"Failed to warm up default pipeline: {exc}")
 
-    with gr.Blocks(title="CoRGI Pipeline Demo") as demo:
+    with gr.Blocks(title="CoRGI Pipeline Demo", css="""
+        .stage-header { 
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        .final-answer-box {
+            background: #e8f5e9;
+            border: 2px solid #4caf50;
+            border-radius: 8px;
+            padding: 16px;
+        }
+    """) as demo:
         state = gr.State()
 
         # Header
-        gr.Markdown("# CoRGI Pipeline\n\nChain of Reasoning with Grounded Insights")
+        gr.Markdown("# CoRGI Pipeline\n\nChain of Reasoning with Grounded Insights - Scroll down to see step-by-step results")
 
-        # Input section
+        # =================================================================
+        # INPUT SECTION
+        # =================================================================
+        gr.Markdown("---")
+        gr.Markdown("## Input")
+        
         with gr.Row():
             image_input = gr.Image(label="Input Image", type="pil", height=400)
-            question_input = gr.Textbox(
-                label="Question",
-                placeholder="What is happening in the image?",
-                lines=3,
-            )
+            with gr.Column():
+                question_input = gr.Textbox(
+                    label="Question",
+                    placeholder="What is happening in the image?",
+                    lines=3,
+                )
+                run_button = gr.Button("Run CoRGI", variant="primary", size="lg")
 
-        # Configuration section
-        with gr.Row():
-            config_dropdown = gr.Dropdown(
-                label="Configuration",
-                choices=available_configs,
-                value=default_config_name,
-                info="Select pipeline configuration",
-            )
-            parallel_loading_checkbox = gr.Checkbox(
-                label="Parallel Model Loading",
-                value=True,
-                info="Load models in parallel (faster startup, more memory)",
-            )
-            batch_captioning_checkbox = gr.Checkbox(
-                label="Batch Captioning",
-                value=True,
-                info="Process multiple captions in batch (faster)",
-            )
+        # Configuration (collapsible)
+        with gr.Accordion("Advanced Configuration", open=False):
+            with gr.Row():
+                config_dropdown = gr.Dropdown(
+                    label="Configuration",
+                    choices=available_configs,
+                    value=default_config_name,
+                    info="Select pipeline configuration",
+                )
+                parallel_loading_checkbox = gr.Checkbox(
+                    label="Parallel Model Loading",
+                    value=True,
+                    info="Load models in parallel (faster startup, more memory)",
+                )
+                batch_captioning_checkbox = gr.Checkbox(
+                    label="Batch Captioning",
+                    value=True,
+                    info="Process multiple captions in batch (faster)",
+                )
+            with gr.Row():
+                model_id_override_input = gr.Textbox(
+                    label="Model ID Override (optional)",
+                    placeholder="Leave blank to use config",
+                    info="Override model ID from config (experimental)",
+                )
+                max_steps_slider = gr.Slider(
+                    label="Max reasoning steps",
+                    minimum=1,
+                    maximum=6,
+                    step=1,
+                    value=3,
+                )
+                max_regions_slider = gr.Slider(
+                    label="Max regions per step",
+                    minimum=1,
+                    maximum=6,
+                    step=1,
+                    value=1,
+                )
 
-        with gr.Row():
-            model_id_override_input = gr.Textbox(
-                label="Model ID Override (optional)",
-                placeholder="Leave blank to use config",
-                info="Override model ID from config (experimental)",
-            )
-            max_steps_slider = gr.Slider(
-                label="Max reasoning steps",
-                minimum=1,
-                maximum=6,
-                step=1,
-                value=3,
-            )
-            max_regions_slider = gr.Slider(
-                label="Max regions per step",
-                minimum=1,
-                maximum=6,
-                step=1,
-                value=1,
-            )
-            run_button = gr.Button("Run CoRGI", variant="primary")
+        # =================================================================
+        # RESULTS SECTION - Scrollable from top to bottom
+        # =================================================================
+        gr.Markdown("---")
+        gr.Markdown("## Pipeline Results")
+        
+        # Hidden image displays (not needed in scrollable layout)
+        input_image_final = gr.Image(visible=False)
+        input_image_reasoning = gr.Image(visible=False)
+        input_image_grounding = gr.Image(visible=False)
+        input_image_evidence = gr.Image(visible=False)
+        input_image_ocr = gr.Image(visible=False)
+        input_image_captioning = gr.Image(visible=False)
+        input_image_synthesis = gr.Image(visible=False)
+        paraphrased_question_output = gr.Textbox(visible=False)
 
-        # Output section with tabs
-        with gr.Tabs():
-            # Final Answer Tab
-            with gr.Tab("Final Answer"):
-                input_image_final = gr.Image(
-                    label="Input Image",
+        # -----------------------------------------------------------------
+        # STAGE 1: Reasoning
+        # -----------------------------------------------------------------
+        with gr.Accordion("Stage 1: Reasoning (Chain of Thought)", open=True):
+            gr.Markdown("*The model generates step-by-step reasoning about the image and question.*")
+            cot_output = gr.Textbox(
+                label="Chain of Thought",
+                lines=8,
+                interactive=False,
+            )
+            structured_steps_output = gr.Markdown(
+                label="Structured Reasoning Steps",
+            )
+            with gr.Accordion("View Reasoning Prompt", open=False):
+                reasoning_prompt_output = gr.Markdown()
+
+        # -----------------------------------------------------------------
+        # STAGE 2: ROI Extraction (Grounding)
+        # -----------------------------------------------------------------
+        with gr.Accordion("Stage 2: ROI Extraction (Grounding)", open=True):
+            gr.Markdown("*The model identifies regions of interest (bounding boxes) for each reasoning step.*")
+            with gr.Row():
+                roi_overview_output = gr.Image(
+                    label="All ROIs Annotated",
                     type="pil",
+                    height=350,
                     visible=False,
                 )
+            roi_gallery_output = gr.Gallery(
+                label="Individual ROI Regions",
+                columns=3,
+                height=300,
+                allow_preview=True,
+                visible=False,
+            )
+            with gr.Accordion("View Grounding Prompts", open=False):
+                grounding_prompts_output = gr.Markdown()
+
+        # -----------------------------------------------------------------
+        # STAGE 3: Evidence Extraction (OCR + Captioning)
+        # -----------------------------------------------------------------
+        with gr.Accordion("Stage 3: Evidence Extraction", open=True):
+            gr.Markdown("*For each ROI, the model extracts text (OCR) or generates captions.*")
+            
+            # Evidence summary table
+            evidence_table_output = gr.Markdown(
+                label="Evidence Summary",
+            )
+            
+            # Cropped regions gallery
+            cropped_images_gallery_output = gr.Gallery(
+                label="Cropped Evidence Regions",
+                columns=4,
+                height=250,
+                allow_preview=True,
+                visible=False,
+            )
+            
+            # Sub-sections for OCR and Captioning
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### OCR Results")
+                    ocr_table_output = gr.Markdown()
+                    ocr_gallery_output = gr.Gallery(
+                        label="OCR Regions",
+                        columns=2,
+                        height=200,
+                        allow_preview=True,
+                        visible=False,
+                    )
+                with gr.Column():
+                    gr.Markdown("### Captioning Results")
+                    captioning_table_output = gr.Markdown()
+                    captioning_gallery_output = gr.Gallery(
+                        label="Captioned Regions",
+                        columns=2,
+                        height=200,
+                        allow_preview=True,
+                        visible=False,
+                    )
+
+        # -----------------------------------------------------------------
+        # STAGE 4: Answer Synthesis (FINAL)
+        # -----------------------------------------------------------------
+        gr.Markdown("---")
+        gr.Markdown("## Final Answer")
+        
+        with gr.Row():
+            with gr.Column(scale=2):
                 final_answer_output = gr.Textbox(
-                    label="Final Answer",
+                    label="Answer",
                     lines=3,
                     interactive=False,
+                    elem_classes=["final-answer-box"],
                 )
                 explanation_output = gr.Textbox(
                     label="Explanation",
-                    lines=5,
+                    lines=4,
                     interactive=False,
                 )
-                paraphrased_question_output = gr.Textbox(
-                    label="Paraphrased Question",
-                    lines=2,
-                    interactive=False,
-                    visible=False,  # Will be shown if available
-                )
-
-            # Reasoning Tab
-            with gr.Tab("Stage 1: Reasoning"):
-                input_image_reasoning = gr.Image(
-                    label="Input Image",
-                    type="pil",
-                    visible=False,
-                )
-                cot_output = gr.Textbox(
-                    label="Chain of Thought (Full Text)",
-                    lines=10,
-                    interactive=False,
-                )
-                structured_steps_output = gr.Markdown(
-                    label="Structured Reasoning Steps",
-                )
-                reasoning_prompt_output = gr.Markdown(
-                    label="Reasoning Prompt",
-                )
-
-            # Grounding Tab
-            with gr.Tab("Stage 2: ROI Extraction"):
-                input_image_grounding = gr.Image(
-                    label="Input Image",
-                    type="pil",
-                    visible=False,
-                )
-                roi_overview_output = gr.Image(
-                    label="Annotated Image with All ROIs",
-                    type="pil",
-                    visible=False,  # Will be shown if available
-                )
-                roi_gallery_output = gr.Gallery(
-                    label="Evidence Gallery",
-                    columns=2,
-                    height=400,
-                    allow_preview=True,
-                    visible=False,  # Will be shown if available
-                )
-                grounding_prompts_output = gr.Markdown(
-                    label="ROI Extraction Prompts",
-                )
-
-            # Evidence Tab (Combined)
-            with gr.Tab("Stage 3: Evidence"):
-                input_image_evidence = gr.Image(
-                    label="Input Image",
-                    type="pil",
-                    visible=False,
-                )
-                evidence_table_output = gr.Markdown(
-                    label="Evidence Table",
-                )
-                cropped_images_gallery_output = gr.Gallery(
-                    label="Cropped Images Gallery",
-                    columns=3,
-                    height=400,
-                    allow_preview=True,
-                    visible=False,
-                )
-
-            # OCR Results Tab
-            with gr.Tab("Stage 3a: OCR Results"):
-                input_image_ocr = gr.Image(
-                    label="Input Image",
-                    type="pil",
-                    visible=False,
-                )
-                ocr_table_output = gr.Markdown(
-                    label="OCR Results Table",
-                )
-                ocr_gallery_output = gr.Gallery(
-                    label="OCR Cropped Images",
-                    columns=3,
-                    height=400,
-                    allow_preview=True,
-                    visible=False,
-                )
-
-            # Captioning Results Tab
-            with gr.Tab("Stage 3b: Captioning Results"):
-                input_image_captioning = gr.Image(
-                    label="Input Image",
-                    type="pil",
-                    visible=False,
-                )
-                captioning_table_output = gr.Markdown(
-                    label="Captioning Results Table",
-                )
-                captioning_gallery_output = gr.Gallery(
-                    label="Captioning Cropped Images",
-                    columns=3,
-                    height=400,
-                    allow_preview=True,
-                    visible=False,
-                )
-
-            # Synthesis Tab
-            with gr.Tab("Stage 4: Answer Synthesis"):
-                input_image_synthesis = gr.Image(
-                    label="Input Image",
-                    type="pil",
-                    visible=False,
-                )
+            with gr.Column(scale=1):
                 key_evidence_overview_output = gr.Image(
                     label="Key Evidence Overview",
                     type="pil",
-                    visible=False,  # Will be shown if available
+                    height=250,
+                    visible=False,
                 )
-                key_evidence_gallery_output = gr.Gallery(
-                    label="Key Evidence Gallery",
-                    columns=2,
-                    height=400,
-                    allow_preview=True,
-                    visible=False,  # Will be shown if available
-                )
-                key_evidence_text_output = gr.Markdown(
-                    label="Key Evidence Details",
-                )
-                answer_prompt_output = gr.Markdown(
-                    label="Answer Synthesis Prompt",
-                )
+        
+        # Key evidence details
+        with gr.Accordion("Key Evidence Details", open=True):
+            key_evidence_gallery_output = gr.Gallery(
+                label="Key Evidence Regions",
+                columns=3,
+                height=250,
+                allow_preview=True,
+                visible=False,
+            )
+            key_evidence_text_output = gr.Markdown()
+            
+            with gr.Accordion("View Synthesis Prompt", open=False):
+                answer_prompt_output = gr.Markdown()
 
-            # Raw Outputs Tab (Debug)
-            with gr.Tab("Debug: Raw Outputs"):
-                raw_outputs_output = gr.Markdown(
-                    label="Raw Model Outputs",
-                )
+        # -----------------------------------------------------------------
+        # DEBUG & PERFORMANCE (Collapsed by default)
+        # -----------------------------------------------------------------
+        gr.Markdown("---")
+        
+        with gr.Accordion("Debug: Raw Model Outputs", open=False):
+            raw_outputs_output = gr.Markdown()
 
-            # Performance Tab
-            with gr.Tab("Performance"):
-                timing_output = gr.Markdown(
-                    label="Performance Metrics",
-                )
+        with gr.Accordion("Performance Metrics", open=False):
+            timing_output = gr.Markdown()
 
         def _on_submit(
             state_data,
