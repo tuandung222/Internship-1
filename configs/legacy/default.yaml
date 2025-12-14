@@ -1,0 +1,52 @@
+# CoRGi Pipeline Configuration - Default (Qwen3-VL Only)
+# 
+# This configuration uses Qwen3-VL-2B-Instruct for all pipeline stages:
+# - Reasoning: Qwen3-VL-2B-Instruct
+# - Grounding: Qwen3-VL-2B-Instruct (via adapter)
+# - Captioning: Qwen3-VL-2B-Instruct (via adapter)
+# - Synthesis: Qwen3-VL-2B-Instruct
+#
+# Optimized for speed and memory efficiency with parallel loading support
+
+reasoning:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:5"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_steps: 3
+  max_new_tokens: 512
+  extraction_method: "hybrid"
+
+grounding:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:5"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_regions: 3
+  max_new_tokens: 128
+
+captioning:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:5"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 128
+
+synthesis:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:5"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 384

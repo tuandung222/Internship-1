@@ -1,0 +1,35 @@
+# Simple V2 Test Config - Qwen3-VL Only (cuda:5)
+# For initial testing of V2 pipeline
+
+reasoning:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+    use_v2_prompt: true
+    use_optimized_prompt: true
+
+grounding:
+  reuse_reasoning: true
+
+captioning:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+
+synthesis:
+  reuse_reasoning: true
+
+pipeline:
+  max_reasoning_steps: 3
+  max_regions_per_step: 1
+  use_v2: false  # Use V1 for now
+
+nms:
+  enabled: true
+  iou_threshold: 0.5

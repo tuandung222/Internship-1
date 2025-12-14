@@ -1,0 +1,48 @@
+# CoRGI Pipeline Configuration with SmolVLM2
+# Using:
+# - Qwen3-VL-2B for reasoning, grounding, and synthesis
+# - PaddleOCR-VL for OCR
+# - SmolVLM2-500M for captioning (replacing FastVLM-1.5B)
+
+# Stage 1: Reasoning (generate chain-of-thought and structured steps)
+reasoning:
+  model_type: qwen_instruct
+  model_id: Qwen/Qwen3-VL-2B-Instruct
+  device: cuda:6
+  enable_compile: false  # Disable for faster startup during testing
+
+# Stage 2: Grounding (extract bounding boxes for reasoning steps)
+grounding:
+  reuse_reasoning: true  # Share Qwen3-VL instance from reasoning
+
+# Stage 3: Evidence Description (OCR + Captioning)
+captioning:
+  model_type: composite  # Composite of OCR + Caption models
+  
+  # OCR sub-component
+  ocr:
+    model_type: paddleocr
+    model_id: PaddlePaddle/PaddleOCR-VL
+    device: cuda:7
+    task: ocr
+  
+  # Caption sub-component (SmolVLM2 - NEW!)
+  caption:
+    model_type: smolvlm2
+    model_id: HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+    device: cuda:7
+    enable_compile: false  # Can enable for production
+
+# Stage 4: Synthesis (generate final answer from evidence)
+synthesis:
+  reuse_reasoning: true  # Share Qwen3-VL instance from reasoning
+
+# Pipeline parameters
+pipeline:
+  max_reasoning_steps: 6
+  max_regions_per_step: 5
+  
+# NMS configuration for grounding
+grounding:
+  nms_enabled: true
+  nms_iou_threshold: 0.5

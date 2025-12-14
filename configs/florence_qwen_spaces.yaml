@@ -1,0 +1,52 @@
+# CoRGi Pipeline Configuration - Florence-2 + Qwen3-VL (Spaces Optimized)
+# 
+# This configuration uses:
+# - Reasoning: Qwen3-VL-2B-Instruct
+# - Grounding: Florence-2-large (faster, better OCR)
+# - Captioning: Florence-2-large
+# - Synthesis: Qwen3-VL-2B-Instruct
+#
+# Optimized for Hugging Face Spaces (CPU/Low VRAM)
+
+reasoning:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cpu"
+    torch_dtype: "float32"
+    enable_compile: false
+    enable_flash_attn: false
+  max_steps: 3
+  max_new_tokens: 512
+  extraction_method: "hybrid"
+
+grounding:
+  model:
+    model_id: "microsoft/Florence-2-large"
+    model_type: "florence2"
+    device: "cpu"
+    torch_dtype: "float32"
+    enable_compile: false
+    enable_flash_attn: false
+  max_regions: 3
+  max_new_tokens: 128
+
+captioning:
+  model:
+    model_id: "microsoft/Florence-2-large"
+    model_type: "florence2"
+    device: "cpu"
+    torch_dtype: "float32"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 128
+
+synthesis:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cpu"
+    torch_dtype: "float32"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 384

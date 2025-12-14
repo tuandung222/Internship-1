@@ -1,0 +1,83 @@
+%%{init: {'theme':'base', 'themeVariables': {'primaryColor':'#e1f5ff', 'primaryTextColor':'#000', 'primaryBorderColor':'#007bff', 'lineColor':'#333', 'secondaryColor':'#fff4e1', 'tertiaryColor':'#ffe1f5', 'background':'#ffffff', 'mainBkg':'#f8f9fa', 'secondBkg':'#ffffff', 'tertiaryBkg':'#f0f0f0'}}}%%
+graph LR
+    subgraph INPUT["📥 INPUT"]
+        IMG[Image]
+        Q[Question]
+    end
+
+    subgraph STAGE1["🔍 STAGE 1: Chain of Thought Reasoning"]
+        direction TB
+        S1_MODEL[Qwen3-VL-2B-Instruct]
+        S1_PROMPT[Prompt Template<br/>INSTRUCT_REASONING_PROMPT]
+        S1_GEN[Generate Reasoning]
+        S1_PARSE[Parse JSON Steps]
+        
+        S1_MODEL --> S1_PROMPT
+        S1_PROMPT --> S1_GEN
+        S1_GEN --> S1_PARSE
+    end
+
+    subgraph STAGE2["🎯 STAGE 2: ROI Extraction (Grounding)"]
+        direction TB
+        S2_FILTER[Filter Steps<br/>needs_vision=True]
+        S2_MODEL[Florence-2-large-ft]
+        S2_TASK[Task: CAPTION_TO_PHRASE_GROUNDING]
+        S2_EXTRACT[Extract Bounding Boxes]
+        S2_NMS[NMS<br/>IoU-based Filtering]
+        S2_NORM[Normalize Coordinates]
+        
+        S2_FILTER --> S2_MODEL
+        S2_MODEL --> S2_TASK
+        S2_TASK --> S2_EXTRACT
+        S2_EXTRACT --> S2_NMS
+        S2_NMS --> S2_NORM
+    end
+
+    subgraph STAGE3["📝 STAGE 3: Evidence Description"]
+        direction TB
+        S3_CROP[Crop Regions]
+        S3_PARALLEL[Parallel Processing]
+        S3_OCR[OCR Task<br/>Florence-2]
+        S3_CAPTION[Captioning Task<br/>Florence-2]
+        S3_COMBINE[Combine Evidence]
+        
+        S3_CROP --> S3_PARALLEL
+        S3_PARALLEL --> S3_OCR
+        S3_PARALLEL --> S3_CAPTION
+        S3_OCR --> S3_COMBINE
+        S3_CAPTION --> S3_COMBINE
+    end
+
+    subgraph STAGE4["✨ STAGE 4: Answer Synthesis"]
+        direction TB
+        S4_MODEL[Qwen3-VL-2B-Instruct]
+        S4_PROMPT[Prompt Template<br/>ANSWER_SYNTHESIS_PROMPT]
+        S4_SYNTH[Synthesize Answer]
+        S4_PARSE[Parse JSON Response]
+        S4_KEY[Select Key Evidence]
+        
+        S4_MODEL --> S4_PROMPT
+        S4_PROMPT --> S4_SYNTH
+        S4_SYNTH --> S4_PARSE
+        S4_PARSE --> S4_KEY
+    end
+
+    subgraph OUTPUT["📤 OUTPUT"]
+        ANSWER[Answer]
+        EXPLANATION[Explanation]
+        KEY_EVIDENCE[Key Evidence]
+    end
+
+    INPUT --> STAGE1
+    STAGE1 -->|Structured Steps| STAGE2
+    STAGE2 -->|Bounding Boxes| STAGE3
+    STAGE3 -->|Evidence| STAGE4
+    STAGE4 --> OUTPUT
+
+    style INPUT fill:#e3f2fd,stroke:#1976d2,stroke-width:2px
+    style STAGE1 fill:#e1f5ff,stroke:#007bff,stroke-width:3px
+    style STAGE2 fill:#fff4e1,stroke:#ff9800,stroke-width:3px
+    style STAGE3 fill:#fff4e1,stroke:#ff9800,stroke-width:3px
+    style STAGE4 fill:#e1f5ff,stroke:#007bff,stroke-width:3px
+    style OUTPUT fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
+

@@ -1,0 +1,65 @@
+# CoRGI Pipeline V2 - Default Configuration
+# Multi-Model Setup (Optimal Balance of Speed, Quality, Memory)
+#
+# Models:
+# - Qwen3-VL-2B-Instruct: Reasoning + Grounding (Phase 1+2)
+# - Florence-2-base: OCR (Phase 3a)
+# - SmolVLM2-500M: Captioning (Phase 3b)
+#
+# Total VRAM: ~8-10GB
+# Expected Performance: 25-30s per inference
+
+# Phase 1+2 MERGED: Structured Reasoning + Grounding
+reasoning:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+    use_v2_prompt: true
+    use_optimized_prompt: true
+
+# Grounding reuses reasoning model (memory efficient)
+grounding:
+  reuse_reasoning: true
+
+# Phase 3: Captioning (Composite - Specialized models for OCR and Caption)
+captioning:
+  model:
+    model_type: composite
+    device: cuda:5
+  
+  # OCR: Florence-2-base-ft for text extraction
+  ocr:
+    model:
+      model_type: florence2
+      model_id: florence-community/Florence-2-base-ft  # Official community checkpoint
+      device: cuda:5
+      enable_compile: false
+      torch_dtype: bfloat16
+  
+  # Captioning: SmolVLM2-500M for object descriptions
+  caption:
+    model:
+      model_type: smolvlm2
+      model_id: HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+      device: cuda:5
+      enable_compile: false
+      torch_dtype: float16
+
+# Phase 4: Synthesis (reuses reasoning model)
+synthesis:
+  reuse_reasoning: true
+
+# Pipeline parameters
+pipeline:
+  max_reasoning_steps: 6
+  max_regions_per_step: 1
+  use_v2: true
+
+# NMS configuration for bbox filtering
+nms:
+  enabled: true
+  iou_threshold: 0.5
+

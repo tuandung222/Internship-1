@@ -1,0 +1,43 @@
+# Simple Qwen-only config WITHOUT reuse_reasoning
+# cuda:5 for testing
+# Updated to Qwen3-VL-2B-Instruct
+
+reasoning:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+
+grounding:
+  model:
+    model_type: qwen_instruct  
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+
+captioning:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+
+synthesis:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+
+pipeline:
+  max_reasoning_steps: 3
+  max_regions_per_step: 1
+
+nms:
+  enabled: true
+  iou_threshold: 0.5

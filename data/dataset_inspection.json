@@ -1,0 +1,115 @@
+{
+  "total_samples": 42678,
+  "features": [
+    "id",
+    "image",
+    "description",
+    "conversations"
+  ],
+  "samples": [
+    {
+      "index": 0,
+      "fields": [
+        "id",
+        "image",
+        "description",
+        "conversations"
+      ],
+      "has_image": true,
+      "has_conversation": false,
+      "has_question": false,
+      "has_text": false,
+      "has_id": true,
+      "image_type": "JpegImageFile",
+      "image_size": [
+        819,
+        317
+      ],
+      "image_mode": "RGB",
+      "id_value": "ca72753774",
+      "processing_success": true,
+      "processed_question": "Biểu đồ này thể hiện thông tin gì?",
+      "processed_sample_id": "sample_ca72753774",
+      "processed_image_size": [
+        819,
+        317
+      ]
+    },
+    {
+      "index": 1,
+      "fields": [
+        "id",
+        "image",
+        "description",
+        "conversations"
+      ],
+      "has_image": true,
+      "has_conversation": false,
+      "has_question": false,
+      "has_text": false,
+      "has_id": true,
+      "image_type": "JpegImageFile",
+      "image_size": [
+        973,
+        615
+      ],
+      "image_mode": "RGB",
+      "id_value": "cc17920da2",
+      "processing_success": true,
+      "processed_question": "Logo 'eBH' ở góc trên bên trái đại diện cho điều gì?",
+      "processed_sample_id": "sample_cc17920da2",
+      "processed_image_size": [
+        973,
+        615
+      ]
+    },
+    {
+      "index": 2,
+      "fields": [
+        "id",
+        "image",
+        "description",
+        "conversations"
+      ],
+      "has_image": true,
+      "has_conversation": false,
+      "has_question": false,
+      "has_text": false,
+      "has_id": true,
+      "image_type": "JpegImageFile",
+      "image_size": [
+        710,
+        474
+      ],
+      "image_mode": "RGB",
+      "id_value": "c6b50e3ef4",
+      "processing_success": true,
+      "processed_question": "Tòa nhà trong ảnh có những đặc điểm kiến trúc nổi bật nào?",
+      "processed_sample_id": "sample_c6b50e3ef4",
+      "processed_image_size": [
+        710,
+        474
+      ]
+    }
+  ],
+  "structure_analysis": {
+    "all_fields": [
+      "image",
+      "id",
+      "description",
+      "conversations"
+    ],
+    "common_fields": [
+      "image",
+      "id",
+      "description",
+      "conversations"
+    ]
+  },
+  "validation_results": {
+    "all_have_image": true,
+    "all_have_conversation": false,
+    "question_extraction_success_rate": 0.0,
+    "processing_success_rate": 1.0
+  }
+}

@@ -1,0 +1,54 @@
+# CoRGi Pipeline Configuration - Qwen + Vintern
+# 
+# This configuration uses:
+# - Reasoning: Qwen3-VL-2B-Instruct
+# - Grounding: Qwen3-VL-2B-Instruct
+# - Captioning: Vintern-1B-v3.5 (OCR + Captioning with VQA)
+# - Synthesis: Qwen3-VL-2B-Instruct
+#
+# Optimized for Vietnamese language support and improved OCR/captioning
+
+reasoning:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:7"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_steps: 3
+  max_new_tokens: 768
+  extraction_method: "hybrid"
+
+grounding:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:7"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_regions: 1
+  max_new_tokens: 128
+  nms_enabled: true
+  nms_iou_threshold: 0.5
+
+captioning:
+  model:
+    model_id: "5CD-AI/Vintern-1B-v3_5"
+    model_type: "vintern"
+    device: "cuda:7"
+    torch_dtype: "bfloat16"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 700
+
+synthesis:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:7"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 512

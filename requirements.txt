@@ -1,0 +1,21 @@
+# Core dependencies - must be installed first
+# huggingface_hub MUST be >=1.0.0 for transformers compatibility
+# Install/upgrade first to prevent conflicts
+huggingface_hub>=1.0.0,<2.0.0
+packaging>=21.0  # For version parsing in app.py
+accelerate>=0.34
+git+https://github.com/huggingface/transformers.git
+pillow
+torch
+torchvision
+gradio>=4.44
+hydra-core
+antlr4-python3-runtime
+spaces
+qwen-vl-utils
+
+# OPTIMIZATION: Performance enhancements
+# flash-attn>=2.5.0  # Flash Attention 2 for 2-3x speedup
+outlines>=0.0.30   # Grammar-constrained decoding for reliable JSON
+pydantic>=2.0      # For structured schemas
+kernels

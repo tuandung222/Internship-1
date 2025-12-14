@@ -1,0 +1,73 @@
+# CoRGi Pipeline Configuration - Qwen + PaddleOCR-VL + FastVLM-1.5B
+# 
+# This configuration uses:
+# - Reasoning: Qwen3-VL-2B-Instruct
+# - Grounding: Qwen3-VL-2B-Instruct (batch mode: single inference for all steps)
+# - OCR: PaddlePaddle/PaddleOCR-VL
+# - Captioning+VQA: apple/FastVLM-1.5B
+# - Synthesis: Qwen3-VL-2B-Instruct
+#
+# Optimized for faster inference with Flash Attention 3 support
+
+reasoning:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:7"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+    max_image_size: 1024  # Limit resolution for Qwen3-VL 2B
+  max_steps: 3
+  max_new_tokens: 768
+  extraction_method: "hybrid"
+  do_sample: false
+  temperature: 0.0
+
+grounding:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:7"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+    max_image_size: 1024  # Limit resolution for Qwen3-VL 2B
+  max_regions: 1
+  max_new_tokens: 512  # Increased for batch grounding
+  nms_enabled: true
+  nms_iou_threshold: 0.5
+
+captioning:
+  # OCR model: PaddleOCR-VL
+  ocr_model:
+    model_id: "PaddlePaddle/PaddleOCR-VL"
+    model_type: "paddleocr"
+    device: "cuda:7"
+    torch_dtype: "bfloat16"
+    enable_compile: false
+    enable_flash_attn: false
+  # Captioning+VQA model: FastVLM-1.5B
+  model:
+    model_id: "apple/FastVLM-1.5B"
+    model_type: "fastvlm"
+    device: "cuda:7"
+    torch_dtype: "float16"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 200  # Reduced from 700 to prevent verbose/hallucinated responses from FastVLM
+  ocr_task: "ocr"  # Options: 'ocr', 'table', 'chart', 'formula'
+
+synthesis:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:7"
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+    max_image_size: 1024  # Limit resolution for Qwen3-VL 2B
+  max_new_tokens: 512
+  do_sample: false
+  temperature: 0.0
+

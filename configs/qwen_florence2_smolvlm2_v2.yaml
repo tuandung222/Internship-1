@@ -1,0 +1,57 @@
+# CoRGI Pipeline V2 Configuration
+# Using cuda:5 for all models
+# - Qwen3-VL for reasoning + grounding (Phase 1+2 MERGED)
+# - Florence-2 for OCR (Phase 3a)
+# - SmolVLM2 for captioning (Phase 3b)
+
+# Phase 1+2 MERGED: Structured Reasoning + Grounding
+reasoning:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+    use_v2_prompt: true
+    use_optimized_prompt: true
+
+# Grounding reuses reasoning model
+grounding:
+  reuse_reasoning: true
+
+# Phase 3: Captioning (Composite)
+captioning:
+  model:
+    model_type: composite
+    device: cuda:5
+  
+  ocr:
+    model:
+      model_type: florence2
+      model_id: microsoft/Florence-2-base-ft
+      device: cuda:5
+      enable_compile: false
+      torch_dtype: float16
+  
+  caption:
+    model:
+      model_type: smolvlm2
+      model_id: HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+      device: cuda:5
+      enable_compile: false
+      torch_dtype: float16
+
+# Phase 4: Synthesis
+synthesis:
+  reuse_reasoning: true
+
+# Pipeline parameters
+pipeline:
+  max_reasoning_steps: 6
+  max_regions_per_step: 1
+  use_v2: true
+
+# NMS configuration
+nms:
+  enabled: true
+  iou_threshold: 0.5

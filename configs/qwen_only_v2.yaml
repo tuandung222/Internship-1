@@ -1,0 +1,41 @@
+# CoRGI Pipeline V2 Configuration - Qwen Only
+# Simple V2 config for testing infrastructure
+
+# Phase 1+2 MERGED: Structured Reasoning + Grounding
+reasoning:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-4B-Instruct
+    device: cuda:5
+    enable_compile: false
+    torch_dtype: bfloat16
+    use_v2_prompt: true
+    use_optimized_prompt: false  # Use full prompt for better quality
+
+# Grounding reuses reasoning model
+grounding:
+  reuse_reasoning: true
+
+# Phase 3: Captioning (Qwen adapter)
+captioning:
+  model:
+    model_type: qwen_instruct
+    model_id: Qwen/Qwen3-VL-2B-Instruct
+    device: cuda:5
+  reuse_reasoning: true  # Reuse same Qwen instance
+
+# Phase 4: Synthesis
+synthesis:
+  reuse_reasoning: true
+
+# Pipeline V2 settings
+pipeline:
+  max_reasoning_steps: 3
+  max_regions_per_step: 1
+  use_v2: true  # Enable V2 pipeline
+
+# NMS configuration
+nms:
+  enabled: true
+  iou_threshold: 0.5
+

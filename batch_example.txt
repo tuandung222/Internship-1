@@ -1,0 +1,19 @@
+# Example batch input file for CoRGI inference
+# Format: image_path|question
+# Lines starting with # are comments
+
+# Street scene examples
+tests/test_images/street1.jpg|How many cars are visible in this street scene?
+tests/test_images/street2.jpg|What is the weather like in this image?
+
+# People detection
+tests/test_images/people1.jpg|How many people are in the image?
+tests/test_images/people2.jpg|What are the people doing?
+
+# Object recognition
+tests/test_images/object1.jpg|What objects can you identify?
+tests/test_images/object2.jpg|Describe the main object in the center
+
+# OCR/Text examples
+tests/test_images/document1.jpg|What does the text say?
+tests/test_images/sign.jpg|What is written on the sign?

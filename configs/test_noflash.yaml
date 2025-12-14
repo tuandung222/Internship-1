@@ -1,0 +1,48 @@
+# Test CoRGi Pipeline Configuration - No Flash Attention
+# 
+# This configuration disables Flash Attention and torch.compile for debugging
+
+reasoning:
+  model:
+    model_id: "Qwen/Qwen3-VL-4B-Instruct"
+    model_type: "qwen_instruct"
+    device: null  # Auto-detect
+    torch_dtype: "auto"  # Auto-select based on hardware
+    enable_compile: false  # Disabled for debugging
+    enable_flash_attn: false  # Disabled - not properly installed
+  max_steps: 3  # Maximum reasoning steps to generate
+  max_new_tokens: 512  # Token limit for reasoning generation
+  extraction_method: "hybrid"  # Method to extract structured steps: regex, llm, or hybrid
+
+grounding:
+  model:
+    model_id: "microsoft/Florence-2-large"
+    model_type: "florence2"
+    device: null
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_regions: 3  # Maximum regions to extract per reasoning step
+  max_new_tokens: 128  # Token limit for grounding
+
+captioning:
+  model:
+    model_id: "microsoft/Florence-2-large"
+    model_type: "florence2"
+    device: null
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 128  # Token limit for region captioning
+
+synthesis:
+  model:
+    model_id: "Qwen/Qwen3-VL-4B-Instruct"
+    model_type: "qwen_instruct"
+    device: null
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 256  # Token limit for answer synthesis
+
+

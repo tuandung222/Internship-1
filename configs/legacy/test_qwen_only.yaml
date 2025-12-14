@@ -1,0 +1,48 @@
+# Test CoRGi Pipeline Configuration - Qwen Only (No Florence)
+# 
+# This configuration uses Qwen for all stages to test the pipeline
+
+reasoning:
+  model:
+    model_id: "Qwen/Qwen3-VL-4B-Instruct"
+    model_type: "qwen_instruct"
+    device: null
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_steps: 2  # Reduced for faster testing
+  max_new_tokens: 256  # Reduced for faster testing
+  extraction_method: "hybrid"
+
+grounding:
+  model:
+    model_id: "Qwen/Qwen3-VL-4B-Instruct"
+    model_type: "qwen_instruct"
+    device: null
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_regions: 2  # Reduced for faster testing
+  max_new_tokens: 128
+
+captioning:
+  model:
+    model_id: "Qwen/Qwen3-VL-4B-Instruct"
+    model_type: "qwen_instruct"
+    device: null
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 128
+
+synthesis:
+  model:
+    model_id: "Qwen/Qwen3-VL-4B-Instruct"
+    model_type: "qwen_instruct"
+    device: null
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 128
+
+

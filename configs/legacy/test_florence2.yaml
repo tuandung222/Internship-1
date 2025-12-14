@@ -1,0 +1,52 @@
+# CoRGi Pipeline Test Configuration - Qwen3-VL + Florence-2-FT
+# 
+# This configuration uses:
+# - Qwen3-VL-2B-Instruct for reasoning and answer synthesis (optimized for speed and memory)
+# - Florence-2-large-ft (fine-tuned) for visual grounding and captioning
+# - SDPA (Scaled Dot Product Attention) for optimized inference
+# - Nucleus sampling for more natural captions
+#
+# This is the INTENDED configuration for best performance
+
+reasoning:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:7"  # Using GPU 7
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_steps: 3
+  max_new_tokens: 512
+  extraction_method: "hybrid"
+
+grounding:
+  model:
+    model_id: "florence-community/Florence-2-large-ft"  # Fine-tuned model
+    model_type: "florence2"
+    device: "cuda:7"  # Same GPU as reasoning for efficiency
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: true  # Note: Florence-2 REQUIRES SDPA attention (enforced in code)
+  max_regions: 3
+  max_new_tokens: 128
+
+captioning:
+  model:
+    model_id: "florence-community/Florence-2-large-ft"  # Fine-tuned model
+    model_type: "florence2"
+    device: "cuda:7"  # Will reuse Florence-2 from grounding
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: true  # Note: Florence-2 REQUIRES SDPA attention (enforced in code)
+  max_new_tokens: 128
+
+synthesis:
+  model:
+    model_id: "Qwen/Qwen3-VL-2B-Instruct"
+    model_type: "qwen_instruct"
+    device: "cuda:7"  # Will reuse Qwen from reasoning
+    torch_dtype: "auto"
+    enable_compile: false
+    enable_flash_attn: false
+  max_new_tokens: 384
