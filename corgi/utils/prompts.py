@@ -228,13 +228,30 @@ VINTERN_CAPTIONING_VQA_PROMPT = """Describe this image region in detail and veri
 
 Provide a detailed visual description of the region, then confirm whether the statement accurately describes what is visible."""
 
-# FastVLM Captioning Prompt - Concise and focused to reduce hallucination
-FASTVLM_CAPTIONING_PROMPT = """Verify: "{statement}"
+# FastVLM Captioning Prompt - Concise for statement verification
+FASTVLM_CAPTIONING_PROMPT_SHORT = """Verify: "{statement}"
 
 Describe ONLY what you see. Quote text exactly. 1-2 sentences max.
 
 Response format:
 [Visible content]. Statement is [correct/incorrect/partially correct]."""
+
+# SmolVLM2 Detailed Captioning Prompt - Super detailed descriptions
+SMOLVLM2_DETAILED_CAPTION_PROMPT = """Describe this image region in comprehensive detail.
+
+Include ALL of the following if visible:
+1. OBJECTS: What objects, people, animals are present? Describe their appearance, colors, positions, poses.
+2. ACTIONS: What is happening? Any interactions between subjects?
+3. ATTRIBUTES: Colors, sizes, textures, materials, conditions, emotions, expressions.
+4. SPATIAL: Where are things located relative to each other? What's in foreground/background?
+5. TEXT: If any text is visible, quote it exactly.
+6. CONTEXT: Scene type, setting, time of day if apparent.
+
+Be specific and observational. Describe what you actually see, not what you assume.
+Provide a detailed paragraph (3-5 sentences minimum)."""
+
+# Alias for backward compatibility
+FASTVLM_CAPTIONING_PROMPT = SMOLVLM2_DETAILED_CAPTION_PROMPT
 
 # ============================================================================
 # SYNTHESIS PROMPTS
@@ -347,6 +364,8 @@ __all__ = [
     "VINTERN_OCR_PROMPT",
     "VINTERN_CAPTIONING_VQA_PROMPT",
     "FASTVLM_CAPTIONING_PROMPT",
+    "FASTVLM_CAPTIONING_PROMPT_SHORT",
+    "SMOLVLM2_DETAILED_CAPTION_PROMPT",
     "ANSWER_SYNTHESIS_PROMPT",
     "LLM_EXTRACTION_PROMPT",
     "format_steps_for_prompt",

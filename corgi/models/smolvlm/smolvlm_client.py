@@ -333,14 +333,23 @@ class SmolVLM2CaptioningClient:
 
             # Build prompt based on mode
             if statement:
-                # VQA mode - verify statement
-                prompt = f"Question: Does this image show the following? '{statement}'\nAnswer yes or no and explain briefly."
-            else:
-                # Captioning mode
-                prompt = FASTVLM_CAPTIONING_PROMPT
+                # VQA mode - verify statement with detailed explanation
+                prompt = f"""Examine this image region carefully and verify the following statement:
+"{statement}"
 
-            # Run inference
-            raw_output = self._chat(cropped, prompt, max_new_tokens=128)
+Provide a detailed analysis:
+1. Describe what you actually see in detail
+2. Compare it with the statement
+3. Conclude whether the statement is correct, incorrect, or partially correct
+4. Explain your reasoning"""
+                max_tokens = 256  # More tokens for detailed VQA
+            else:
+                # Captioning mode - super detailed
+                prompt = FASTVLM_CAPTIONING_PROMPT
+                max_tokens = 512  # More tokens for detailed captioning
+
+            # Run inference with appropriate token limit
+            raw_output = self._chat(cropped, prompt, max_new_tokens=max_tokens)
             caption = raw_output.strip() if raw_output else ""
 
             # Log result

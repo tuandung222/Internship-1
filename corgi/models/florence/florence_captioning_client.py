@@ -67,16 +67,10 @@ def _load_florence_backend(
     if model_id not in _FLORENCE_MODEL_CACHE:
         logger.info(f"Loading Florence-2 captioning model: {model_id}")
 
-        # Determine dtype - Florence-2 requires bfloat16
-        if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-            torch_dtype = torch.bfloat16
-            logger.info("Florence-2 Captioning: Using bfloat16")
-        else:
-            # Fallback to bfloat16 anyway - Florence-2 is designed for it
-            torch_dtype = torch.bfloat16
-            logger.warning(
-                "Florence-2 Captioning: bf16 not supported, but using bfloat16 anyway (required by Florence-2)"
-            )
+        # Determine dtype - Florence-2 works best with float16 (as per official notebook)
+        # bfloat16 can cause compatibility issues with some transformers versions
+        torch_dtype = torch.float16
+        logger.info("Florence-2 Captioning: Using float16 (recommended)")
 
         # Override if specified in config
         if config.torch_dtype and config.torch_dtype != "auto":
@@ -158,20 +152,25 @@ def _load_florence_backend(
                     f"GPU memory before load: {free_memory / 1024**3:.2f} GB free"
                 )
 
-        # Load model following official Florence-2 documentation
-        # https://huggingface.co/florence-community/Florence-2-base-ft
-        # Use device_map directly in from_pretrained (NOT .to() after)
-        # Note: attn_implementation='eager' is used to avoid SDPA compatibility issues
-        # with newer transformers versions (4.57+)
+        # Load model following official Florence-2 notebook pattern
+        # https://huggingface.co/microsoft/Florence-2-large-ft
+        # Use .eval().cuda() pattern (NOT device_map) for compatibility
         try:
+            # Extract device ID for .cuda() call
+            device_id = 0
+            if device_map.startswith("cuda:"):
+                device_id = int(device_map.split(":")[1])
+            
+            # Load with dtype='auto' and move to device with .cuda()
+            # attn_implementation='eager' bypasses SDPA compatibility check in remote code
             model = ModelClass.from_pretrained(
                 model_id,
-                torch_dtype=torch.bfloat16,
-                device_map=device_map,  # Direct device mapping in from_pretrained
+                torch_dtype='auto',  # Let model decide dtype
                 trust_remote_code=True,
-                attn_implementation='eager',  # Avoid SDPA issues with remote code
-            ).eval()
-            logger.info(f"Florence-2 Captioning loaded on {device_map}")
+                attn_implementation='eager',  # Bypass SDPA check in buggy remote code
+            ).eval().cuda(device_id)
+            
+            logger.info(f"Florence-2 Captioning loaded on cuda:{device_id}")
         except RuntimeError as e:
             error_msg = str(e)
             # Check if it's a CUDA OOM error
@@ -285,8 +284,12 @@ class Florence2CaptioningClient:
 
         logger.debug(f"[Florence-2 Captioning] Prompt: {prompt[:100]}")
 
-        # Prepare inputs
-        inputs = self._processor(text=prompt, images=image, return_tensors="pt")
+        # Prepare inputs - following official Florence-2 notebook pattern
+        # Use .to('cuda', torch.float16) for inputs
+        device = self.config.device
+        inputs = self._processor(
+            text=prompt, images=image, return_tensors="pt"
+        ).to(device, torch.float16)
 
         logger.debug(
             f"[Florence-2 Captioning] Processor output keys: {list(inputs.keys())}"
@@ -297,32 +300,17 @@ class Florence2CaptioningClient:
                 f"[Florence-2 Captioning] pixel_values: shape={pv.shape if pv is not None else None}, dtype={pv.dtype if pv is not None else None}"
             )
 
-        # Move to device from config and ensure correct dtype
-        device = torch.device(self.config.device)
-        inputs = {
-            k: (
-                v.to(device=device, dtype=torch.bfloat16)
-                if k == "pixel_values" and isinstance(v, torch.Tensor)
-                else v.to(device) if isinstance(v, torch.Tensor)
-                else v
-            )
-            for k, v in inputs.items()
-        }
-
-        # Generate with autocast for bfloat16
-        # Note: Using greedy decoding (num_beams=1) to avoid compatibility issues
-        # with beam search in remote code + transformers 4.57+
-        device_type = "cuda" if "cuda" in self.config.device else "cpu"
-        with torch.no_grad(), torch.autocast(
-            device_type=device_type, dtype=torch.bfloat16
-        ):
-            generated_ids = self._model.generate(
-                input_ids=inputs["input_ids"],
-                pixel_values=inputs["pixel_values"],
-                max_new_tokens=1024,
-                num_beams=1,  # Greedy decoding - avoid beam search issues
-                do_sample=False,  # Greedy
-            )
+        # Generate with greedy decoding and no caching
+        # Note: remote code has bug in prepare_inputs_for_generation with past_key_values
+        # Using use_cache=False to avoid this issue
+        generated_ids = self._model.generate(
+            input_ids=inputs["input_ids"],
+            pixel_values=inputs["pixel_values"],
+            max_new_tokens=1024,
+            do_sample=False,
+            num_beams=1,
+            use_cache=False,  # Avoid past_key_values bug in remote code
+        )
 
         # Decode
         generated_text = self._processor.batch_decode(
