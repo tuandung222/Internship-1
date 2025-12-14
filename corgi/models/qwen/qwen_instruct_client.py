@@ -257,6 +257,11 @@ class Qwen3VLInstructClient:
         self.image_logger = image_logger
         self.output_tracer = output_tracer
 
+        # Prompt logs (used by PipelineResult / Gradio UI)
+        # Keep these names aligned with SupportsVLMClient in corgi/core/pipeline.py.
+        self.reasoning_log = None
+        self.answer_log = None
+
         # Load model and processor
         # We reuse the loading logic from QwenInstructClient but wrapped in this class
         # Ideally we should inherit, but for now we'll just instantiate a helper or duplicate logic
@@ -331,6 +336,19 @@ class Qwen3VLInstructClient:
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False,
         )[0]
+
+        # Record prompt I/O for UI/debugging.
+        try:
+            from ...core.types import PromptLog
+
+            self.reasoning_log = PromptLog(
+                prompt=prompt,
+                response=response,
+                stage="reasoning",
+            )
+        except Exception:
+            # Logging should never break inference.
+            self.reasoning_log = None
         
         # Parse V1 response (hybrid format: CoT + JSON)
         cot_text, steps = parse_hybrid_reasoning_response(response, max_steps)
@@ -392,6 +410,18 @@ class Qwen3VLInstructClient:
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False,
         )[0]
+
+        # Record prompt I/O for UI/debugging.
+        try:
+            from ...core.types import PromptLog
+
+            self.reasoning_log = PromptLog(
+                prompt=prompt,
+                response=response,
+                stage="reasoning_v2",
+            )
+        except Exception:
+            self.reasoning_log = None
         
         # Parse V2 response
         cot_text, steps = parse_structured_reasoning_v2(response)
@@ -493,6 +523,18 @@ Use up to 3 key evidence items. Respond with JSON only."""
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False,
         )[0]
+
+        # Record synthesis prompt I/O for UI/debugging.
+        try:
+            from ...core.types import PromptLog
+
+            self.answer_log = PromptLog(
+                prompt=prompt,
+                response=response,
+                stage="answer_synthesis",
+            )
+        except Exception:
+            self.answer_log = None
         
         # Strip thinking tags if the model emits them (defensive)
         cleaned_response = response

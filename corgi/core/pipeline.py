@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Protocol
 
+import logging
 import time
 
 from PIL import Image
@@ -22,6 +23,7 @@ from .types import (
     steps_to_serializable,
 )
 
+logger = logging.getLogger(__name__)
 
 class SupportsVLMClient(Protocol):
     """
@@ -163,6 +165,11 @@ class CoRGIPipeline:
         max_regions: int = 3,
     ) -> PipelineResult:
         self._vlm.reset_logs()
+        if self.output_tracer is not None and hasattr(self.output_tracer, "reset"):
+            try:
+                self.output_tracer.reset()
+            except Exception:
+                pass
         timings: List[StageTiming] = []
         total_start = time.monotonic()
 
@@ -283,10 +290,15 @@ class CoRGIPipeline:
             )
 
         answer_start = time.monotonic()
+        logger.info("[Pipeline] Stage 4: answer_synthesis starting")
         answer, key_evidence, explanation = self._vlm.synthesize_answer(
             image=image, question=question, steps=steps, evidences=evidences
         )
         answer_duration = (time.monotonic() - answer_start) * 1000.0
+        logger.info(
+            "[Pipeline] Stage 4: answer_synthesis completed in %.2fs",
+            answer_duration / 1000.0,
+        )
         timings.append(
             StageTiming(name="answer_synthesis", duration_ms=answer_duration)
         )

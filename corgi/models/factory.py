@@ -137,10 +137,15 @@ class CompositeVLMClient:
             cot_text, steps = self.reasoning.generate_reasoning(
                 image, question, max_steps
             )
-            # Store CoT text in logs and as attribute for pipeline access
-            self._reasoning_log = PromptLog(
-                prompt=f"Question: {question}", response=cot_text, stage="reasoning"
-            )
+            # Prefer the underlying model's full prompt/response log if available.
+            model_log = getattr(self.reasoning, "reasoning_log", None)
+            if model_log is not None:
+                self._reasoning_log = model_log
+            else:
+                # Fallback: at least store question + CoT text.
+                self._reasoning_log = PromptLog(
+                    prompt=f"Question: {question}", response=cot_text, stage="reasoning"
+                )
             self._cot_text = cot_text  # Store for pipeline access
             return steps
         else:
@@ -173,10 +178,14 @@ class CompositeVLMClient:
             cot_text, steps = self.reasoning.structured_reasoning_v2(
                 image, question, max_steps
             )
-            # Store logs
-            self._reasoning_log = PromptLog(
-                prompt=f"Question: {question}", response=cot_text, stage="reasoning_v2"
-            )
+            # Prefer the underlying model's full prompt/response log if available.
+            model_log = getattr(self.reasoning, "reasoning_log", None)
+            if model_log is not None:
+                self._reasoning_log = model_log
+            else:
+                self._reasoning_log = PromptLog(
+                    prompt=f"Question: {question}", response=cot_text, stage="reasoning_v2"
+                )
             self._cot_text = cot_text
             return cot_text, steps
         else:

@@ -39,6 +39,11 @@ class OutputTracer:
             self.traces_dir = self.output_dir / "traces"
             self.traces_dir.mkdir(parents=True, exist_ok=True)
 
+    def reset(self) -> None:
+        """Clear all in-memory trace state (useful when reusing a cached pipeline)."""
+        self.entries.clear()
+        self.stages.clear()
+
     def trace_reasoning(
         self,
         raw_output: str,
@@ -334,5 +339,22 @@ class OutputTracer:
 
         logger.info(f"Saved trace summary: {file_path}")
 
+class InMemoryOutputTracer(OutputTracer):
+    """
+    Output tracer that keeps entries in memory but does not write files.
 
-__all__ = ["OutputTracer"]
+    Useful for interactive UIs (Gradio) where we want to show raw I/O without
+    creating trace artifacts on disk for every request.
+    """
+
+    def __init__(self, enabled: bool = True):
+        super().__init__(output_dir=Path("/tmp/corgi_ui_traces"), enabled=enabled)
+
+    def _save_trace_entry(self, entry: OutputTraceEntry, filename_prefix: str) -> None:
+        return
+
+    def save_summary(self, file_path: Optional[Path] = None) -> None:
+        return
+
+
+__all__ = ["OutputTracer", "InMemoryOutputTracer"]

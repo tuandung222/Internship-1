@@ -60,6 +60,7 @@ from ..core.types import (
     StageTiming,
 )
 from PIL import ImageDraw
+from ..utils.output_tracer import InMemoryOutputTracer
 
 logger = logging.getLogger("corgi.gradio_app")
 
@@ -183,9 +184,30 @@ def _run_pipeline(
             return _create_pipeline_from_config_v2_gpu(
                 config_path=config_path,
                 parallel_loading=parallel_loading,
+                output_tracer=InMemoryOutputTracer(enabled=True),
             )
 
         pipeline = _get_pipeline(cache_key, create_pipeline)
+        # Ensure we have an in-memory tracer even when the pipeline comes from cache.
+        try:
+            if getattr(pipeline, "output_tracer", None) is None:
+                tracer = InMemoryOutputTracer(enabled=True)
+                pipeline.output_tracer = tracer
+                vlm = getattr(pipeline, "_vlm", None)
+                for obj in (
+                    pipeline,
+                    vlm,
+                    getattr(vlm, "reasoning", None),
+                    getattr(vlm, "grounding", None),
+                    getattr(vlm, "captioning", None),
+                    getattr(vlm, "synthesis", None),
+                    getattr(getattr(vlm, "captioning", None), "ocr_client", None),
+                    getattr(getattr(vlm, "captioning", None), "captioning_client", None),
+                ):
+                    if obj is not None and hasattr(obj, "output_tracer"):
+                        setattr(obj, "output_tracer", tracer)
+        except Exception:
+            pass
         # Toggle batch evidence extraction on the cached pipeline.
         try:
             vlm = getattr(pipeline, "_vlm", None)
@@ -215,7 +237,17 @@ def _run_pipeline(
         )
 
     new_state = PipelineState(model_id=cache_key, pipeline=pipeline)
-    payload = _prepare_ui_payload_components(rgb_image, result, MAX_UI_STEPS)
+    trace_entries: List[dict] = []
+    try:
+        tracer = getattr(pipeline, "output_tracer", None)
+        if tracer is not None and getattr(tracer, "entries", None):
+            trace_entries = [e.to_dict() for e in tracer.entries]
+    except Exception:
+        trace_entries = []
+
+    payload = _prepare_ui_payload_components(
+        rgb_image, result, MAX_UI_STEPS, trace_entries=trace_entries
+    )
     return new_state, payload
 
 
@@ -223,6 +255,8 @@ def _prepare_ui_payload_components(
     image: Image.Image,
     result: PipelineResult,
     max_slots: int = MAX_UI_STEPS,
+    *,
+    trace_entries: Optional[List[dict]] = None,
 ) -> Dict[str, object]:
     """Prepare UI payload using Gradio components instead of HTML."""
 
@@ -280,6 +314,58 @@ def _prepare_ui_payload_components(
     grounding_prompts_text = _format_grounding_prompts_text(result.grounding_logs)
     answer_prompt_text = _format_prompt_text(result.answer_log, "Answer Synthesis")
 
+    # Raw prompt I/O (for trace-style UI)
+    reasoning_prompt_raw = result.reasoning_log.prompt if result.reasoning_log else ""
+    reasoning_response_raw = (
+        result.reasoning_log.response if result.reasoning_log else ""
+    )
+    synthesis_prompt_raw = result.answer_log.prompt if result.answer_log else ""
+    synthesis_response_raw = result.answer_log.response if result.answer_log else ""
+
+    # Structured JSON views
+    try:
+        from ..core.types import steps_to_serializable, evidences_to_serializable
+
+        structured_steps_json = steps_to_serializable(result.steps)
+        evidence_json = evidences_to_serializable(result.evidence)
+    except Exception:
+        structured_steps_json = []
+        evidence_json = []
+
+    synthesis_input_json = {
+        "question": result.question,
+        "cot_text": result.cot_text or "",
+        "steps": structured_steps_json,
+        "evidence": evidence_json,
+    }
+    synthesis_output_json = {
+        "answer": result.answer,
+        "explanation": result.explanation or "",
+        "paraphrased_question": result.paraphrased_question or "",
+        "key_evidence": [
+            {
+                "bbox": list(ke.bbox),
+                "description": ke.description,
+                "reasoning": ke.reasoning,
+            }
+            for ke in (result.key_evidence or [])
+        ],
+    }
+
+    trace_markdown = _format_trace_markdown(
+        result=result,
+        image=image,
+        structured_steps_json=structured_steps_json,
+        evidence_json=evidence_json,
+        synthesis_input_json=synthesis_input_json,
+        synthesis_output_json=synthesis_output_json,
+        reasoning_prompt_raw=reasoning_prompt_raw,
+        reasoning_response_raw=reasoning_response_raw,
+        synthesis_prompt_raw=synthesis_prompt_raw,
+        synthesis_response_raw=synthesis_response_raw,
+        trace_entries=trace_entries or [],
+    )
+
     # Cropped images gallery
     cropped_images_gallery = _prepare_cropped_images_gallery(image, result.evidence)
 
@@ -300,6 +386,8 @@ def _prepare_ui_payload_components(
     return {
         # Input image (for display at top of tabs)
         "input_image": image,
+        # Unified trace (scrollable markdown)
+        "trace_markdown": trace_markdown,
         # Final Answer
         "final_answer": final_answer_text,
         "explanation": explanation_text,
@@ -307,6 +395,9 @@ def _prepare_ui_payload_components(
         # Chain of Thought
         "cot_text": cot_text,
         "structured_steps": structured_steps_text,
+        "structured_steps_json": structured_steps_json,
+        "reasoning_prompt_raw": reasoning_prompt_raw,
+        "reasoning_response_raw": reasoning_response_raw,
         "reasoning_prompt": reasoning_prompt_text,
         # Step-by-step
         "step_panels": step_panels,
@@ -317,6 +408,7 @@ def _prepare_ui_payload_components(
         # Evidence
         "evidence_table": evidence_table_text,
         "cropped_images_gallery": cropped_images_gallery,
+        "evidence_json": evidence_json,
         # OCR Results
         "ocr_table": ocr_table_text,
         "ocr_gallery": ocr_gallery,
@@ -327,6 +419,10 @@ def _prepare_ui_payload_components(
         "key_evidence_overview_image": key_evidence_overview,
         "key_evidence_gallery": key_evidence_gallery,
         "key_evidence_text": key_evidence_text,
+        "synthesis_input_json": synthesis_input_json,
+        "synthesis_output_json": synthesis_output_json,
+        "synthesis_prompt_raw": synthesis_prompt_raw,
+        "synthesis_response_raw": synthesis_response_raw,
         "answer_prompt": answer_prompt_text,
         # Raw Outputs (Debug)
         "raw_outputs": raw_outputs_text,
@@ -421,6 +517,175 @@ def _format_structured_steps_text(
         lines.append("\n".join(step_lines))
 
     return "\n\n".join(lines)
+
+
+def _format_trace_markdown(
+    *,
+    result: PipelineResult,
+    image: Image.Image,
+    structured_steps_json: object,
+    evidence_json: object,
+    synthesis_input_json: object,
+    synthesis_output_json: object,
+    reasoning_prompt_raw: str,
+    reasoning_response_raw: str,
+    synthesis_prompt_raw: str,
+    synthesis_response_raw: str,
+    trace_entries: List[dict],
+) -> str:
+    """Generate a scrollable Markdown trace with raw I/O for each pipeline stage."""
+    def _code_block(lang: str, text: str) -> str:
+        text = (text or "").strip()
+        if not text:
+            return f"```{lang}\n\n```"
+        return f"```{lang}\n{text}\n```"
+
+    def _json_block(obj: object) -> str:
+        import json
+
+        try:
+            return _code_block("json", json.dumps(obj, ensure_ascii=False, indent=2))
+        except Exception:
+            return _code_block("json", "[]")
+
+    sections: list[str] = []
+    w, h = image.size
+
+    sections.append("## Input")
+    sections.append(f"- **Question:** {result.question}")
+    sections.append(f"- **Image size:** {w}×{h}")
+    sections.append("")
+
+    sections.append("## Stage 1 — Reasoning (Structured)")
+    sections.append("### Input: Reasoning Prompt")
+    sections.append(_code_block("text", reasoning_prompt_raw))
+    sections.append("")
+    sections.append("### Output: Raw Model Response")
+    sections.append(_code_block("text", reasoning_response_raw))
+    sections.append("")
+    sections.append("### Output: Chain-of-Thought (Parsed)")
+    sections.append(_code_block("text", result.cot_text or ""))
+    sections.append("")
+    sections.append("### Output: Structured Steps JSON (Parsed)")
+    sections.append(_json_block(structured_steps_json))
+    sections.append("")
+
+    sections.append("## Stage 2 — ROIs (Grounding)")
+    if result.evidence:
+        sections.append("### Output: Regions per Step")
+        by_step = _group_evidence_by_step(result.evidence)
+        for step in result.steps:
+            evs = by_step.get(step.index, [])
+            sections.append(f"**Step {step.index}:** {step.statement}")
+            if not evs:
+                sections.append("- No ROIs")
+                sections.append("")
+                continue
+            for i, ev in enumerate(evs, start=1):
+                bbox = ", ".join(f"{c:.3f}" for c in ev.bbox)
+                sections.append(f"- ROI {i}: bbox=[{bbox}]")
+            sections.append("")
+    else:
+        sections.append("_No ROIs returned._\n")
+
+    if result.grounding_logs:
+        sections.append("### Raw Grounding Logs (Prompt/Response)")
+        for i, log in enumerate(result.grounding_logs, start=1):
+            sections.append(f"**Log {i} (stage={log.stage}, step={log.step_index})**")
+            sections.append(_code_block("text", log.prompt))
+            sections.append(_code_block("text", log.response or ""))
+            sections.append("")
+
+    sections.append("## Stage 3 — Evidence Extraction (OCR + Captioning)")
+    sections.append("### Input/Output: Evidence JSON (Parsed)")
+    sections.append(_json_block(evidence_json))
+    sections.append("")
+    # Raw evidence calls (captioning/OCR) captured by the in-memory tracer.
+    cap_entries = [e for e in (trace_entries or []) if e.get("stage") == "captioning"]
+    if cap_entries:
+        sections.append("### Raw Evidence Calls (Tracer)")
+        sections.append("_Long raw outputs may be truncated for UI responsiveness._")
+        sections.append("")
+
+        for idx, entry in enumerate(cap_entries, start=1):
+            step_idx = entry.get("step_index")
+            bbox_idx = entry.get("bbox_index")
+            model = entry.get("model_name", "")
+            dur = entry.get("duration_ms", 0.0)
+            meta = entry.get("metadata", {}) or {}
+            bbox = meta.get("bbox")
+            ocr_mode = bool(meta.get("ocr_mode"))
+
+            task = None
+            for st in entry.get("intermediate_states", []) or []:
+                if isinstance(st, dict) and "task" in st:
+                    task = st.get("task")
+                    break
+
+            header = f"**Call {idx}: step={step_idx}, bbox={bbox_idx}, model={model}**"
+            if ocr_mode or task == "<OCR>":
+                header += " _(OCR)_"
+            sections.append(header)
+            if bbox:
+                sections.append(f"- bbox: `{bbox}`")
+            if task:
+                sections.append(f"- task: `{task}`")
+            if dur:
+                try:
+                    sections.append(f"- duration: `{float(dur):.1f} ms`")
+                except Exception:
+                    sections.append(f"- duration: `{dur} ms`")
+
+            raw = (entry.get("raw_output") or "").strip()
+            if raw and len(raw) > 2000:
+                raw = raw[:2000] + "\n\n...[truncated]..."
+            sections.append(_code_block("text", raw))
+
+            parsed = entry.get("parsed_output")
+            try:
+                import json
+
+                parsed_text = json.dumps(parsed, ensure_ascii=False, indent=2)
+            except Exception:
+                parsed_text = str(parsed)
+            if parsed_text and len(parsed_text) > 2000:
+                parsed_text = parsed_text[:2000] + "\n\n...[truncated]..."
+            sections.append(_code_block("json", parsed_text))
+            sections.append("")
+    if result.evidence:
+        sections.append("### Output: Human-readable Evidence")
+        for i, ev in enumerate(result.evidence, start=1):
+            bbox = ", ".join(f"{c:.3f}" for c in ev.bbox)
+            desc = (ev.description or "").strip()
+            ocr = (ev.ocr_text or "").strip()
+            sections.append(f"**Evidence {i} (step {ev.step_index})**")
+            sections.append(f"- bbox: [{bbox}]")
+            if ocr:
+                sections.append(f"- OCR: {ocr}")
+            if desc:
+                sections.append(f"- Caption: {desc}")
+            sections.append("")
+    else:
+        sections.append("_No evidence extracted._\n")
+
+    sections.append("## Stage 4 — Answer Synthesis")
+    sections.append("### Input: Synthesis Inputs (JSON)")
+    sections.append(_json_block(synthesis_input_json))
+    sections.append("")
+    sections.append("### Input: Synthesis Prompt")
+    sections.append(_code_block("text", synthesis_prompt_raw))
+    sections.append("")
+    sections.append("### Output: Raw Synthesis Response")
+    sections.append(_code_block("text", synthesis_response_raw))
+    sections.append("")
+    sections.append("### Output: Parsed Synthesis JSON")
+    sections.append(_json_block(synthesis_output_json))
+    sections.append("")
+
+    sections.append("## Performance")
+    sections.append(_code_block("text", _format_timing_text(result.timings)))
+
+    return "\n".join(sections)
 
 
 def _format_evidence_table_text(
@@ -715,6 +980,7 @@ def build_demo(
             _PIPELINE_CACHE[cache_key] = _create_pipeline_from_config_v2(
                 config_path=default_config,
                 parallel_loading=True,
+                output_tracer=InMemoryOutputTracer(enabled=True),
             )
             logger.info("✓ Default pipeline warmed up successfully")
     except Exception as exc:
@@ -806,6 +1072,10 @@ def build_demo(
         # =================================================================
         gr.Markdown("---")
         gr.Markdown("## Pipeline Results")
+
+        # A single scrollable trace view (Markdown) with raw I/O per stage.
+        with gr.Accordion("Trace (Raw I/O per stage — scroll down)", open=True):
+            trace_markdown_output = gr.Markdown()
         
         # Hidden image displays (not needed in scrollable layout)
         input_image_final = gr.Image(visible=False)
@@ -830,6 +1100,25 @@ def build_demo(
             structured_steps_output = gr.Markdown(
                 label="Structured Reasoning Steps",
             )
+            structured_steps_json_output = gr.JSON(
+                label="Structured reasoning (raw JSON)",
+                open=False,
+            )
+            with gr.Accordion("Raw Reasoning I/O", open=False):
+                reasoning_prompt_raw_output = gr.Code(
+                    label="Reasoning prompt (input)",
+                    language=None,
+                    lines=12,
+                    interactive=False,
+                    wrap_lines=True,
+                )
+                reasoning_response_raw_output = gr.Code(
+                    label="Reasoning raw response (output)",
+                    language=None,
+                    lines=12,
+                    interactive=False,
+                    wrap_lines=True,
+                )
             with gr.Accordion("View Reasoning Prompt", open=False):
                 reasoning_prompt_output = gr.Markdown()
 
@@ -967,6 +1256,30 @@ def build_demo(
             with gr.Accordion("View Synthesis Prompt", open=False):
                 answer_prompt_output = gr.Markdown()
 
+            with gr.Accordion("Synthesis I/O (raw + JSON)", open=False):
+                synthesis_input_json_output = gr.JSON(
+                    label="Synthesis inputs (JSON)",
+                    open=False,
+                )
+                synthesis_prompt_raw_output = gr.Code(
+                    label="Synthesis prompt (input)",
+                    language=None,
+                    lines=14,
+                    interactive=False,
+                    wrap_lines=True,
+                )
+                synthesis_response_raw_output = gr.Code(
+                    label="Synthesis raw response (output)",
+                    language=None,
+                    lines=14,
+                    interactive=False,
+                    wrap_lines=True,
+                )
+                synthesis_output_json_output = gr.JSON(
+                    label="Synthesis output (parsed JSON)",
+                    open=False,
+                )
+
         # -----------------------------------------------------------------
         # DEBUG & PERFORMANCE (Collapsed by default)
         # -----------------------------------------------------------------
@@ -1024,9 +1337,10 @@ def build_demo(
 
             outputs = [
                 new_state,
+                payload.get("trace_markdown", ""),
                 # Final Answer Tab
                 gr.update(
-                    value=input_image, visible=input_image is not None
+                    value=None, visible=False
                 ),  # input_image_final
                 payload["final_answer"],
                 payload["explanation"],
@@ -1036,10 +1350,13 @@ def build_demo(
                 ),
                 # Reasoning Tab
                 gr.update(
-                    value=input_image, visible=input_image is not None
+                    value=None, visible=False
                 ),  # input_image_reasoning
                 payload["cot_text"],
                 payload["structured_steps"],
+                payload.get("structured_steps_json", []),
+                payload.get("reasoning_prompt_raw", ""),
+                payload.get("reasoning_response_raw", ""),
                 payload["reasoning_prompt"],
                 # Step-by-step panels (fixed slots)
                 *list(
@@ -1060,7 +1377,7 @@ def build_demo(
                 ),
                 # Grounding Tab
                 gr.update(
-                    value=input_image, visible=input_image is not None
+                    value=None, visible=False
                 ),  # input_image_grounding
                 gr.update(
                     value=payload.get("roi_overview_image"), visible=has_roi_overview
@@ -1069,7 +1386,7 @@ def build_demo(
                 payload["grounding_prompts"],
                 # Evidence Tab
                 gr.update(
-                    value=input_image, visible=input_image is not None
+                    value=None, visible=False
                 ),  # input_image_evidence
                 payload["evidence_table"],
                 gr.update(
@@ -1077,13 +1394,13 @@ def build_demo(
                 ),
                 # OCR Results Tab
                 gr.update(
-                    value=input_image, visible=input_image is not None
+                    value=None, visible=False
                 ),  # input_image_ocr
                 payload["ocr_table"],
                 gr.update(value=payload["ocr_gallery"], visible=has_ocr_gallery),
                 # Captioning Results Tab
                 gr.update(
-                    value=input_image, visible=input_image is not None
+                    value=None, visible=False
                 ),  # input_image_captioning
                 payload["captioning_table"],
                 gr.update(
@@ -1091,7 +1408,7 @@ def build_demo(
                 ),
                 # Synthesis Tab
                 gr.update(
-                    value=input_image, visible=input_image is not None
+                    value=None, visible=False
                 ),  # input_image_synthesis
                 gr.update(
                     value=payload.get("key_evidence_overview_image"),
@@ -1102,6 +1419,10 @@ def build_demo(
                 ),
                 payload["key_evidence_text"],
                 payload["answer_prompt"],
+                payload.get("synthesis_input_json", {}),
+                payload.get("synthesis_prompt_raw", ""),
+                payload.get("synthesis_response_raw", ""),
+                payload.get("synthesis_output_json", {}),
                 # Raw Outputs Tab
                 payload["raw_outputs"],
                 # Performance Tab
@@ -1126,6 +1447,7 @@ def build_demo(
             ],
             outputs=[
                 state,
+                trace_markdown_output,
                 # Final Answer Tab
                 input_image_final,
                 final_answer_output,
@@ -1135,6 +1457,9 @@ def build_demo(
                 input_image_reasoning,
                 cot_output,
                 structured_steps_output,
+                structured_steps_json_output,
+                reasoning_prompt_raw_output,
+                reasoning_response_raw_output,
                 reasoning_prompt_output,
                 # Step-by-step panels (accordion + markdown + gallery) x MAX_UI_STEPS
                 *list(
@@ -1168,6 +1493,10 @@ def build_demo(
                 key_evidence_gallery_output,
                 key_evidence_text_output,
                 answer_prompt_output,
+                synthesis_input_json_output,
+                synthesis_prompt_raw_output,
+                synthesis_response_raw_output,
+                synthesis_output_json_output,
                 # Raw Outputs Tab
                 raw_outputs_output,
                 # Performance Tab
