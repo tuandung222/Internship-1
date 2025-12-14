@@ -76,3 +76,19 @@ _hf_space/
 # Trace results
 results/
 *.log
+
+# Cursor AI
+.cursor/
+
+# HuggingFace cache
+.huggingface/
+huggingface_hub/
+
+# Large files
+*.safetensors
+*.bin
+*.onnx
+
+# Notebooks outputs  
+notebooks/outputs/
+notebooks/*.html

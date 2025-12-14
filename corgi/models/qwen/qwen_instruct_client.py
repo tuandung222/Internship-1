@@ -17,6 +17,8 @@ import time
 import torch
 from PIL import Image
 
+logger = logging.getLogger(__name__)
+
 try:
     from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
 
@@ -42,8 +44,6 @@ except ImportError:
         # Also patch AutoModel mapping if possible, though AutoConfig is usually the gatekeeper
     except Exception as e:
         logger.warning(f"Failed to patch transformers for Qwen3-VL: {e}")
-
-logger = logging.getLogger(__name__)
 
 
 # Model cache for reusing loaded models
@@ -134,15 +134,51 @@ class QwenInstructClient:
         # https://github.com/Qwen/Qwen3-VL/cookbooks
         model_load_start = time.time()
         
-        from transformers import AutoModelForVision2Seq
+        import warnings
+
+        try:
+            # Transformers >= 4.48
+            from transformers import AutoModelForImageTextToText as _AutoQwenModel
+
+            model_class_name = "AutoModelForImageTextToText"
+        except Exception:
+            # Backward compatibility (deprecated in newer transformers)
+            from transformers import AutoModelForVision2Seq as _AutoQwenModel
+
+            model_class_name = "AutoModelForVision2Seq"
+
+        def _load_model_with_auto_dtype():
+            base_kwargs = {
+                "device_map": device_map,
+                "trust_remote_code": True,
+            }
+            # Newer transformers prefers `dtype=...`; older uses `torch_dtype=...`.
+            try:
+                return _AutoQwenModel.from_pretrained(model_id, dtype="auto", **base_kwargs)
+            except TypeError:
+                return _AutoQwenModel.from_pretrained(
+                    model_id, torch_dtype="auto", **base_kwargs
+                )
         
-        model = AutoModelForVision2Seq.from_pretrained(
-            model_id,
-            torch_dtype="auto",  # Official: use "auto" for best dtype
-            device_map=device_map,
-            trust_remote_code=True,
-        )
-        logger.info(f"Qwen3-VL loaded on {device_map} using AutoModelForVision2Seq")
+        # Suppress common transformers warnings during model loading
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=FutureWarning,
+                message=".*AutoModelForVision2Seq.*deprecated.*",
+            )
+            warnings.filterwarnings(
+                "ignore",
+                category=FutureWarning,
+                message=".*torch_dtype.*deprecated.*",
+            )
+            warnings.filterwarnings("ignore", category=UserWarning, 
+                                    message=".*Torch was not compiled with flash attention.*")
+            warnings.filterwarnings("ignore", 
+                                    message=".*You are using a model of type.*")
+            
+            model = _load_model_with_auto_dtype()
+        logger.info(f"Qwen3-VL loaded on {device_map} using {model_class_name}")
 
         model_load_time = time.time() - model_load_start
         logger.info(f"Model weights loaded in {model_load_time:.2f}s")
@@ -436,8 +472,7 @@ Use up to 3 key evidence items. Respond with JSON only."""
             padding=True,
         )
         # Move inputs to model device
-        device = self.config.device if hasattr(self, 'config') else 'cuda:5'
-        inputs = inputs.to(device)
+        inputs = inputs.to(self._model.device)
         
         # Generate
         generated_ids = self._model.generate(
@@ -459,17 +494,93 @@ Use up to 3 key evidence items. Respond with JSON only."""
             clean_up_tokenization_spaces=False,
         )[0]
         
+        # Strip thinking tags if the model emits them (defensive)
+        cleaned_response = response
+        if "</think>" in cleaned_response:
+            cleaned_response = cleaned_response.split("</think>", 1)[-1]
+        cleaned_response = cleaned_response.replace("<think>", "").strip()
+
         # Parse JSON response
         import json
+        import re
+        
+        def repair_json(json_str: str) -> str:
+            """Attempt to repair common JSON issues from LLM output."""
+            # Remove any markdown code blocks
+            json_str = re.sub(r'^```json\s*', '', json_str.strip())
+            json_str = re.sub(r'\s*```$', '', json_str.strip())
+            json_str = json_str.replace("…", "")
+            
+            # Replace single quotes with double quotes (but not within strings)
+            # This is a simple heuristic - replace ' with " for property names
+            json_str = re.sub(r"'([^']+)':", r'"\1":', json_str)
+            json_str = re.sub(r":\s*'([^']*)'([,}\]])", r': "\1"\2', json_str)
+            
+            # Fix trailing commas before } or ]
+            json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+            
+            # Fix missing commas between elements (common LLM error)
+            # Pattern: "value" followed by newline and then "key":
+            json_str = re.sub(r'"\s*\n\s*"', '",\n"', json_str)
+
+            # Pattern: ] or } or number/bool/null followed by newline and then "key":
+            json_str = re.sub(
+                r'(\]|\}|true|false|null|-?\d+(?:\.\d+)?)\s*\n\s*"',
+                r"\1,\n\"",
+                json_str,
+                flags=re.IGNORECASE,
+            )
+            
+            # Fix missing commas after } or ] followed by { or "
+            json_str = re.sub(r'}\s*\n\s*{', '},\n{', json_str)
+            json_str = re.sub(r'}\s*\n\s*"', '},\n"', json_str)
+            json_str = re.sub(r']\s*\n\s*{', '],\n{', json_str)
+            json_str = re.sub(r']\s*\n\s*"', '],\n"', json_str)
+
+            # Same repairs without newlines (sometimes the model omits line breaks)
+            json_str = re.sub(r'}\s*{', '},{', json_str)
+            json_str = re.sub(r'}\s*"', '},"', json_str)
+            json_str = re.sub(r']\s*{', '],{', json_str)
+            json_str = re.sub(r']\s*"', '],"', json_str)
+            
+            # Fix newlines inside string values (common in descriptions)
+            # This is tricky - we need to be careful not to break valid JSON
+            # Replace literal newlines inside strings with \n
+            def fix_string_newlines(match):
+                content = match.group(1)
+                # Replace actual newlines with escaped newlines
+                content = content.replace('\n', '\\n').replace('\r', '\\r')
+                return f'"{content}"'
+            
+            # Match strings that might have newlines (between quotes, allowing for escapes)
+            # Only apply to values, not the whole JSON
+            json_str = re.sub(r'"([^"\\]*(?:\\.[^"\\]*)*)"', fix_string_newlines, json_str)
+            
+            return json_str
+        
         try:
             # Find JSON in response
-            start_idx = response.find("{")
-            end_idx = response.rfind("}")
+            start_idx = cleaned_response.find("{")
+            end_idx = cleaned_response.rfind("}")
             if start_idx != -1 and end_idx != -1:
-                json_str = response[start_idx:end_idx+1]
-                data = json.loads(json_str)
+                json_str = cleaned_response[start_idx:end_idx+1]
                 
-                answer = data.get("answer", response)
+                # Try parsing directly first
+                try:
+                    data = json.loads(json_str)
+                except json.JSONDecodeError:
+                    # Try to repair and parse again
+                    repaired_json = repair_json(json_str)
+                    try:
+                        data = json.loads(repaired_json)
+                        logger.info("JSON repaired successfully")
+                    except json.JSONDecodeError as e2:
+                        # Log the problematic JSON for debugging
+                        logger.warning(f"JSON repair failed: {e2}")
+                        logger.debug(f"Original JSON: {json_str[:500]}...")
+                        raise e2
+                
+                answer = data.get("answer", cleaned_response)
                 explanation = data.get("explanation", None)
                 key_evidences = []
                 
@@ -490,9 +601,27 @@ Use up to 3 key evidence items. Respond with JSON only."""
                 
                 return answer, key_evidences, explanation
         except Exception as e:
-            logger.error(f"Failed to parse synthesis response: {e}")
-            # Fallback
-            return response[:500], [], None
+            logger.warning(f"Failed to parse synthesis response as JSON: {e}")
+            # Try to extract answer from text as final fallback
+            # Look for common patterns like "answer": "..." or just return first sentence
+            answer_match = re.search(
+                r'"answer"\s*:\s*"((?:\\.|[^"\\])*)"',
+                cleaned_response,
+                flags=re.DOTALL,
+            )
+            if answer_match:
+                answer_text = answer_match.group(1).strip()
+                explanation_match = re.search(
+                    r'"explanation"\s*:\s*"((?:\\.|[^"\\])*)"',
+                    cleaned_response,
+                    flags=re.DOTALL,
+                )
+                explanation_text = (
+                    explanation_match.group(1).strip() if explanation_match else None
+                )
+                return answer_text, [], explanation_text or None
+            # Fallback to first meaningful sentence
+            return cleaned_response.strip().split('\n')[0][:500], [], None
     
     def _chat(
         self, image: Image.Image, prompt: str, max_new_tokens: int = 512

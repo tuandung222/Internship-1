@@ -1,16 +1,12 @@
 # CoRGI: Chain of Reasoning with Grounded Insights
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Transformers](https://img.shields.io/badge/transformers-5.0.0.dev0-orange.svg)](https://github.com/huggingface/transformers)
-
 **CoRGI** is a modular framework that enhances reasoning reliability in vision-language models (VLMs) through **post-hoc visual verification** of chain-of-thought outputs. Unlike traditional VLMs that generate fluent but unverified reasoning chains (single-look bias), CoRGI performs structured reasoning first, then verifies each step against actual visual evidence, reducing hallucinations and improving faithfulness.
 
-## 🌟 Key Features
+## Key Features
 
 ### Pipeline V2 (Latest)
 - **Merged Phase 1+2**: Single VLM call generates both reasoning steps and bounding boxes
-- **Smart Evidence Routing**: Automatic classification → Object captioning OR OCR (not both)
+- **Smart Evidence Routing**: Automatic classification into object captioning or OCR (not both)
 - **Integrated Grounding**: Bounding boxes from reasoning phase (optional fallback grounding)
 - **37% faster**: Reduced from ~10s to ~6.3s per inference
 - **Memory Efficient**: 67% less VRAM with `reuse_reasoning: true`
@@ -24,51 +20,51 @@
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [Architecture](#-architecture)
-- [Installation](#-installation)
-- [Quick Start](#-quick-start)
-- [Pipeline V2 vs V1](#-pipeline-v2-vs-v1)
-- [Configuration](#-configuration)
-- [Model Support](#-model-support)
-- [Project Structure](#-project-structure)
-- [Documentation](#-documentation)
-- [Performance](#-performance)
-- [Examples](#-examples)
-- [Contributing](#-contributing)
+- [Architecture](#architecture)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Pipeline V2 vs V1](#pipeline-v2-vs-v1)
+- [Configuration](#configuration)
+- [Model Support](#model-support)
+- [Project Structure](#project-structure)
+- [Documentation](#documentation)
+- [Performance](#performance)
+- [Examples](#examples)
+- [Contributing](#contributing)
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ### Pipeline V2 Flow (Mermaid)
 
 ```mermaid
 flowchart TD
     subgraph INPUT
-        A[🖼️ Image + ❓ Question]
+        A[Image + Question]
     end
 
     subgraph PHASE_1_2["Phase 1+2: Reasoning + Grounding (Merged)"]
-        B[🧠 Qwen3-VL-2B-Instruct]
-        B --> |"Chain-of-Thought"| C["📝 Structured Steps<br/>• statement<br/>• need_object_captioning<br/>• need_text_ocr<br/>• bbox [x1,y1,x2,y2]"]
+        B[Qwen3-VL-2B-Instruct]
+        B --> |"Chain-of-Thought"| C["Structured Steps<br/>• statement<br/>• need_object_captioning<br/>• need_text_ocr<br/>• bbox [x1,y1,x2,y2]"]
     end
 
     subgraph PHASE_3["Phase 3: Smart Evidence Routing"]
         D{Evidence Type?}
-        E[🎨 SmolVLM2<br/>Object Caption]
-        F[📄 Florence-2<br/>Text OCR]
+        E[SmolVLM2<br/>Object Caption]
+        F[Florence-2<br/>Text OCR]
         D -->|need_object_captioning| E
         D -->|need_text_ocr| F
     end
 
     subgraph PHASE_4["Phase 4: Answer Synthesis"]
-        G[🧠 Qwen3-VL<br/>reused from Phase 1]
+        G[Qwen3-VL<br/>reused from Phase 1]
     end
 
     subgraph OUTPUT
-        H["✅ Answer + Explanation<br/>📊 Evidence with BBoxes<br/>📈 trace.json (optional)"]
+        H["Answer + Explanation<br/>Evidence with BBoxes<br/>trace.json (optional)"]
     end
 
     A --> B
@@ -84,57 +80,6 @@ flowchart TD
     style H fill:#e8f5e9
 ```
 
-### Pipeline Flow (ASCII)
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  INPUT: Image + Question                                     │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-        ┌───────────────▼────────────────┐
-        │  Phase 1+2 MERGED              │
-        │  Qwen3-VL-2B-Instruct          │
-        │  ┌──────────────────────────┐  │
-        │  │ <THINKING>               │  │
-        │  │ Chain-of-thought...      │  │
-        │  │ </THINKING>              │  │
-        │  │                          │  │
-        │  │ <STRUCTURED_STEPS>       │  │
-        │  │ {                        │  │
-        │  │   "steps": [             │  │
-        │  │     {                    │  │
-        │  │       "statement": "...", │  │
-        │  │       "need_object": T,  │  │
-        │  │       "need_text": F,    │  │
-        │  │       "bbox": [x,y,w,h]  │  │
-        │  │     }                    │  │
-        │  │   ]                      │  │
-        │  │ }                        │  │
-        │  │ </STRUCTURED_STEPS>      │  │
-        │  └──────────────────────────┘  │
-        └───────────────┬────────────────┘
-                        │
-        ┌───────────────▼────────────────┐
-        │  Phase 3: Smart Routing        │
-        │  ┌──────────────┬────────────┐ │
-        │  │ need_object? │ need_text? │ │
-        │  │      ↓       │     ↓      │ │
-        │  │  SmolVLM2    │ Florence-2 │ │
-        │  │  Caption     │    OCR     │ │
-        │  └──────────────┴────────────┘ │
-        └───────────────┬────────────────┘
-                        │
-        ┌───────────────▼────────────────┐
-        │  Phase 4: Answer Synthesis     │
-        │  Qwen3-VL-2B-Instruct          │
-        │  (reused from Phase 1)         │
-        └───────────────┬────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────────┐
-│  OUTPUT: Answer + Explanation + Key Evidence (with bboxes)  │
-└─────────────────────────────────────────────────────────────┘
-```
-
 ### V2 Design Principles
 
 1. **Efficiency**: Minimize VLM calls by integrating grounding into reasoning
@@ -144,7 +89,7 @@ flowchart TD
 
 ---
 
-## 🚀 Installation
+## Installation
 
 ### Prerequisites
 
@@ -183,7 +128,7 @@ docker run -it --gpus all ghcr.io/yourusername/corgi:latest
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 ### Unified CLI Inference
 
@@ -218,7 +163,7 @@ python inference_traced.py --image photo.jpg --question "..." --output results/t
 ```
 results/trace/
 ├── trace.json           # Complete trace data (all component I/O)
-├── trace_report.html    # Visual HTML report 🌐
+├── trace_report.html    # Visual HTML report
 ├── summary.txt          # Quick summary
 ├── images/original.jpg  # Input image
 ├── crops/*.jpg          # Cropped input regions per component
@@ -232,7 +177,7 @@ results/trace/
 # Default (V2 pipeline, standard mode)
 python app_unified.py
 
-# Chatbot mode with streaming (⭐ Recommended)
+# Chatbot mode with streaming
 python app_unified.py --mode chatbot
 
 # V1 pipeline
@@ -245,7 +190,7 @@ python app_unified.py --port 7861 --share
 python app_unified.py --spaces
 ```
 
-#### Chatbot Streaming Mode (⭐ Recommended)
+#### Chatbot Streaming Mode
 
 Real-time streaming interface with step-by-step execution:
 
@@ -257,10 +202,10 @@ python gradio_chatbot_v2.py
 ```
 
 **Features:**
-- ✅ Real-time streaming of each phase
-- ✅ Progressive bbox visualization
-- ✅ Chatbot-style conversation
-- ✅ Live progress updates
+- Real-time streaming of each phase
+- Progressive bbox visualization
+- Chatbot-style conversation
+- Live progress updates
 
 #### Standard Interface
 
@@ -340,7 +285,7 @@ for event in pipeline.run_streaming(image, question):
 
 ---
 
-## 🔄 Pipeline V2 vs V1
+## Pipeline V2 vs V1
 
 | Feature | V1 (Legacy) | V2 (Current) | Improvement |
 |---------|-------------|--------------|-------------|
@@ -366,7 +311,7 @@ for event in pipeline.run_streaming(image, question):
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Example: Qwen-Only V2 Pipeline
 
@@ -440,15 +385,15 @@ pipeline:
 
 ---
 
-## 🤖 Model Support
+## Model Support
 
 ### Reasoning Models
 
 | Model | Size | VRAM | Speed | Quality | V2 Support |
 |-------|------|------|-------|---------|------------|
-| **Qwen/Qwen3-VL-2B-Instruct** | 2B | 6GB | Fast | Good | ✅ |
-| **Qwen/Qwen3-VL-4B-Instruct** | 4B | 10GB | Medium | Excellent | ✅ |
-| Qwen/Qwen3-VL-8B-Instruct | 8B | 18GB | Slow | Best | ✅ |
+| Qwen/Qwen3-VL-2B-Instruct | 2B | 6GB | Fast | Good | Yes |
+| Qwen/Qwen3-VL-4B-Instruct | 4B | 10GB | Medium | Excellent | Yes |
+| Qwen/Qwen3-VL-8B-Instruct | 8B | 18GB | Slow | Best | Yes |
 
 ### Grounding Models
 
@@ -474,15 +419,15 @@ pipeline:
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 corgi_custom/
 ├── corgi/                          # Main package
 │   ├── core/                       # Core pipeline components
 │   │   ├── pipeline.py             # V1 pipeline (legacy)
-│   │   ├── pipeline_v2.py          # V2 pipeline (current) ⭐
-│   │   ├── streaming.py            # Streaming API ⭐ NEW
+│   │   ├── pipeline_v2.py          # V2 pipeline (current)
+│   │   ├── streaming.py            # Streaming API
 │   │   ├── types.py                # V1 data models
 │   │   ├── types_v2.py             # V2 data models
 │   │   └── config.py               # Configuration schemas
@@ -495,25 +440,24 @@ corgi_custom/
 │   │   ├── vintern/                # Vintern client
 │   │   └── composite/              # Composite captioning
 │   └── utils/                      # Utilities
-│       ├── inference_helpers.py    # Shared inference utilities ⭐ NEW
-│       ├── trace_reporter.py       # Trace reporter for debugging ⭐ NEW
+│       ├── inference_helpers.py    # Shared inference utilities
+│       ├── trace_reporter.py       # Trace reporter for debugging
 │       ├── prompts_v2.py           # V2 prompt templates
 │       ├── parsers_v2.py           # V2 response parsers
 │       └── coordinate_utils.py     # Bbox coordinate handling
 ├── configs/                        # Configuration files
-│   ├── README.md                   # Config guide ⭐ NEW
+│   ├── README.md                   # Config guide
 │   ├── qwen_only_v2.yaml           # Qwen-only V2 config (recommended)
 │   ├── qwen_florence2_smolvlm2_v2.yaml  # Multi-model V2
 │   └── legacy/                     # V1 configs (backward compat)
 ├── docs/                           # Documentation
-│   ├── QUICK_REFERENCE.md          # Quick usage guide ⭐ NEW
+│   ├── QUICK_REFERENCE.md          # Quick usage guide
 │   ├── CODEBASE_ANALYSIS.md        # Codebase analysis
-│   ├── REFACTOR_ROADMAP.md         # Refactoring roadmap
 │   └── REFACTOR_PLAN.md            # Refactoring plan
 ├── tests/                          # Test suite
 │   ├── integration/                # Integration tests
 │   │   ├── test_real_pipeline.py   # V1 pipeline test
-│   │   └── test_unified_pipeline.py # Unified pipeline test ⭐ NEW
+│   │   └── test_unified_pipeline.py # Unified pipeline test
 │   └── unit/                       # Unit tests
 ├── archive/                        # Archived legacy files
 │   ├── legacy_apps/                # Old Gradio apps (app_v2.py, etc.)
@@ -523,10 +467,10 @@ corgi_custom/
 │   └── test_results/               # Old test outputs
 │
 │ ── ENTRYPOINTS (Use These) ────────
-├── inference.py                    # Unified CLI inference (V1+V2) ⭐
-├── inference_traced.py             # Traced inference with HTML report ⭐ NEW
-├── app_unified.py                  # Unified Gradio app (all modes) ⭐
-├── gradio_chatbot_v2.py            # Streaming chatbot UI ⭐
+├── inference.py                    # Unified CLI inference (V1+V2)
+├── inference_traced.py             # Traced inference with HTML report
+├── app_unified.py                  # Unified Gradio app (all modes)
+├── gradio_chatbot_v2.py            # Streaming chatbot UI
 │
 │
 ├── requirements.txt                # Python dependencies
@@ -535,7 +479,7 @@ corgi_custom/
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 ### Core Documentation
 
@@ -561,7 +505,7 @@ corgi_custom/
 
 ---
 
-## 📊 Performance
+## Performance
 
 ### Benchmark (V2 Pipeline, Qwen3-VL-4B-Instruct)
 
@@ -604,7 +548,7 @@ corgi_custom/
 
 ---
 
-## 💡 Examples
+## Examples
 
 ### Example 1: Document Understanding
 
@@ -678,7 +622,7 @@ python inference_v2.py \
 
 ---
 
-## 🛠️ Development
+## Development
 
 ### Running Tests
 
@@ -724,7 +668,7 @@ See [Custom Models Guide](docs/guides/CUSTOM_MODELS.md) for details.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -738,13 +682,13 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgements
+## Acknowledgements
 
 - **Qwen Team** at Alibaba for Qwen3-VL models
 - **Microsoft** for Florence-2 grounding models
@@ -754,7 +698,7 @@ This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) f
 
 ---
 
-## 📞 Contact & Support
+## Contact & Support
 
 - **Issues**: [GitHub Issues](https://github.com/yourusername/corgi_implementation/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/yourusername/corgi_implementation/discussions)
@@ -762,29 +706,7 @@ This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) f
 
 ---
 
-## 📈 Roadmap
-
-### Q1 2025
-- [ ] Multi-GPU support for pipeline parallelism
-- [ ] Batch processing optimization
-- [ ] Docker images for easy deployment
-- [ ] API server with FastAPI
-
-### Q2 2025
-- [ ] Video understanding support
-- [ ] Multi-turn dialogue capabilities
-- [ ] KV cache optimization
-- [ ] Mobile deployment (ONNX)
-
-### Q3 2025
-- [ ] Multi-lingual support (non-English)
-- [ ] Fine-tuning scripts for custom domains
-- [ ] Cloud deployment templates (AWS, Azure, GCP)
-- [ ] Performance benchmarking suite
-
----
-
-## 📊 Citation
+## Citation
 
 If you use CoRGI in your research, please cite:
 
@@ -797,13 +719,3 @@ If you use CoRGI in your research, please cite:
   howpublished={\url{https://github.com/yourusername/corgi_implementation}}
 }
 ```
-
----
-
-<div align="center">
-
-**Made with ❤️ by the CoRGI Team**
-
-[Documentation](docs/) • [Examples](examples/) • [Contributing](CONTRIBUTING.md)
-
-</div>
