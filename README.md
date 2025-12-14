@@ -8,13 +8,12 @@
 - **Merged Phase 1+2**: Single VLM call generates both reasoning steps and bounding boxes
 - **Smart Evidence Routing**: Automatic classification into object captioning or OCR (not both)
 - **Integrated Grounding**: Bounding boxes from reasoning phase (optional fallback grounding)
-- **37% faster**: Reduced from ~10s to ~6.3s per inference
 - **Memory Efficient**: 67% less VRAM with `reuse_reasoning: true`
 
 ### Core Capabilities
 - **Modular Architecture**: Mix and match different VLMs for each stage
 - **Multi-Model Support**: Qwen3-VL, Florence-2, SmolVLM2, FastVLM, PaddleOCR-VL
-- **Flash Attention 3**: Optimized kernels for 2-3x speedup
+- **Flash Attention 2/3**: Optimized kernels for 2-3x speedup
 - **Flexible Configuration**: YAML-based pipeline configuration
 - **Rich Outputs**: JSON results, visualizations, cropped evidence regions
 
@@ -101,7 +100,7 @@ flowchart TD
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/corgi_implementation.git
+git clone https://github.com/tuandung222/Internship-1.git
 cd corgi_implementation/corgi_custom
 
 # Create virtual environment
@@ -292,8 +291,6 @@ for event in pipeline.run_streaming(image, question):
 | **Reasoning + Grounding** | 2 separate calls | 1 merged call | **-35% latency** |
 | **Evidence Extraction** | Always OCR + Caption | Smart routing | **-49% latency** |
 | **Bbox Source** | Always grounding model | Reasoning model first | **-50% grounding calls** |
-| **Memory (3 models)** | 18GB VRAM | 6GB VRAM | **-67% memory** |
-| **Total Latency** | ~10.0s | ~6.3s | **-37% faster** |
 | **Evidence Type** | Fixed | Model-decided | **Better accuracy** |
 
 ### When to Use V1 vs V2
@@ -698,24 +695,18 @@ This project is licensed under the Apache License 2.0 - see [LICENSE](LICENSE) f
 
 ---
 
-## Contact & Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/corgi_implementation/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/corgi_implementation/discussions)
-- **Email**: your.email@example.com
-
----
-
 ## Citation
 
-If you use CoRGI in your research, please cite:
-
 ```bibtex
-@misc{corgi2024,
-  title={CoRGI: Chain of Reasoning with Grounded Insights},
-  author={Your Name},
-  year={2024},
-  publisher={GitHub},
-  howpublished={\url{https://github.com/yourusername/corgi_implementation}}
+@misc{yi2025corgiverifiedchainofthoughtreasoning,
+      title={CoRGI: Verified Chain-of-Thought Reasoning with Post-hoc Visual Grounding}, 
+      author={Shixin Yi and Lin Shang},
+      year={2025},
+      eprint={2508.00378},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2508.00378}, 
 }
+```
+
 ```

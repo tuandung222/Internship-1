@@ -89,7 +89,12 @@ class CompositeVLMClient:
         self.config = config
         self.image_logger = image_logger
         self.output_tracer = output_tracer
+        self.batch_evidence_enabled = True
         self.reset_logs()
+
+    def set_batch_evidence_enabled(self, enabled: bool) -> None:
+        """Enable/disable batch evidence extraction (OCR + captioning)."""
+        self.batch_evidence_enabled = bool(enabled)
 
     def reset_logs(self) -> None:
         """Reset prompt/response logs."""
@@ -578,6 +583,118 @@ class CompositeVLMClient:
             # Process bboxes for each step
             all_evidences: List[GroundedEvidence] = []
 
+            # Fast path: batch captioning across all steps (single captioning generate call).
+            # This is especially useful when max_regions is small (e.g., 1) but there are
+            # many steps, which would otherwise trigger many small sequential caption calls.
+            try:
+                if self.batch_evidence_enabled and hasattr(
+                    self.captioning, "caption_regions_batch"
+                ):
+                    flat_regions: List[Tuple[ReasoningStep, BBox]] = []
+                    for step in vision_steps:
+                        step_bboxes = bboxes_by_step.get(step.index, [])
+                        for bbox in step_bboxes:
+                            flat_regions.append((step, bbox))
+
+                    if len(flat_regions) > 1:
+                        flat_bboxes = [bbox for _, bbox in flat_regions]
+
+                        # Only run OCR for steps that request it.
+                        ocr_indices = [
+                            idx
+                            for idx, (step, _) in enumerate(flat_regions)
+                            if getattr(step, "need_ocr", False)
+                        ]
+
+                        captions: List[str] = [""] * len(flat_bboxes)
+                        ocr_texts: List[str] = [""] * len(flat_bboxes)
+
+                        with ThreadPoolExecutor(max_workers=2) as executor:
+                            caption_future = executor.submit(
+                                self.captioning.caption_regions_batch,
+                                image,
+                                flat_bboxes,
+                                0,  # batch across steps
+                            )
+                            ocr_future = None
+                            if (
+                                ocr_indices
+                                and hasattr(self.captioning, "ocr_regions_batch")
+                            ):
+                                ocr_bboxes = [flat_bboxes[i] for i in ocr_indices]
+                                ocr_future = executor.submit(
+                                    self.captioning.ocr_regions_batch,
+                                    image,
+                                    ocr_bboxes,
+                                    0,  # batch across steps
+                                )
+
+                            captions = caption_future.result() or [""] * len(flat_bboxes)
+                            if len(captions) != len(flat_bboxes):
+                                logger.warning(
+                                    "Captioning batch returned %d results, expected %d",
+                                    len(captions),
+                                    len(flat_bboxes),
+                                )
+                                captions = (captions + [""] * len(flat_bboxes))[: len(flat_bboxes)]
+
+                            if ocr_future:
+                                ocr_results = ocr_future.result() or [""] * len(ocr_indices)
+                                if len(ocr_results) != len(ocr_indices):
+                                    logger.warning(
+                                        "OCR batch returned %d results, expected %d",
+                                        len(ocr_results),
+                                        len(ocr_indices),
+                                    )
+                                    ocr_results = (ocr_results + [""] * len(ocr_indices))[
+                                        : len(ocr_indices)
+                                    ]
+                                for rel_idx, flat_idx in enumerate(ocr_indices):
+                                    ocr_texts[flat_idx] = ocr_results[rel_idx] or ""
+
+                        for flat_idx, ((step, bbox), caption) in enumerate(
+                            zip(flat_regions, captions)
+                        ):
+                            all_evidences.append(
+                                GroundedEvidence(
+                                    bbox=bbox,
+                                    description=caption or "",
+                                    ocr_text=ocr_texts[flat_idx] or "",
+                                    step_index=step.index,
+                                    confidence=0.95,
+                                )
+                            )
+
+                        # Per-step logs for consistency
+                        for step in vision_steps:
+                            step_evidences = [
+                                ev for ev in all_evidences if ev.step_index == step.index
+                            ]
+                            summary = (
+                                f"Extracted {len(step_evidences)} evidence regions for step {step.index} "
+                                f"(OCR + Captioning)"
+                            )
+                            self._grounding_logs.append(
+                                PromptLog(
+                                    prompt=step.statement,
+                                    response=summary,
+                                    step_index=step.index,
+                                    stage="grounding_composite",
+                                )
+                            )
+
+                        logger.info(
+                            "Batch grounding completed: %d total evidence regions across %d steps",
+                            len(all_evidences),
+                            len(vision_steps),
+                        )
+                        return all_evidences
+            except Exception as e:
+                logger.warning(
+                    "Cross-step batch captioning failed, falling back to per-step execution: %s",
+                    e,
+                )
+
             for step in vision_steps:
                 step_bboxes = bboxes_by_step.get(step.index, [])
                 if not step_bboxes:
@@ -596,8 +713,9 @@ class CompositeVLMClient:
                     )
 
                 # Try batch parallel execution first
-                if hasattr(self.captioning, "ocr_regions_batch") or hasattr(
-                    self.captioning, "caption_regions_batch"
+                if self.batch_evidence_enabled and (
+                    hasattr(self.captioning, "ocr_regions_batch")
+                    or hasattr(self.captioning, "caption_regions_batch")
                 ):
                     try:
                         results = self._run_ocr_and_caption_batch_parallel(
@@ -764,8 +882,9 @@ class CompositeVLMClient:
             )
 
             # Try batch parallel execution first
-            if hasattr(self.captioning, "ocr_regions_batch") or hasattr(
-                self.captioning, "caption_regions_batch"
+            if self.batch_evidence_enabled and (
+                hasattr(self.captioning, "ocr_regions_batch")
+                or hasattr(self.captioning, "caption_regions_batch")
             ):
                 try:
                     results = self._run_ocr_and_caption_batch_parallel(
@@ -930,6 +1049,44 @@ class VLMClientFactory:
         
         # Note: Previously we force-enabled parallel loading when multiple models exist.
         # This caused "meta tensor" errors on some systems. Now we respect the user's choice.
+        if config.requires_parallel_loading() and parallel_loading:
+            # Parallel loading only helps when models are placed on different devices.
+            # When multiple models target the same CUDA device, concurrent loading can be
+            # unstable and may trigger "meta tensor" issues in practice.
+            try:
+                devices: List[str] = []
+                if config.reasoning.model and config.reasoning.model.device:
+                    devices.append(str(config.reasoning.model.device))
+                if (
+                    config.captioning.model
+                    and config.captioning.model.model_type == "composite"
+                ):
+                    if config.captioning.ocr.model and config.captioning.ocr.model.device:
+                        devices.append(str(config.captioning.ocr.model.device))
+                    if (
+                        config.captioning.caption.model
+                        and config.captioning.caption.model.device
+                    ):
+                        devices.append(str(config.captioning.caption.model.device))
+                elif config.captioning.model and config.captioning.model.device:
+                    devices.append(str(config.captioning.model.device))
+
+                devices = [d for d in devices if d]
+                unique_devices = sorted(set(devices))
+                if (
+                    len(unique_devices) <= 1
+                    and unique_devices
+                    and unique_devices[0].startswith("cuda:")
+                ):
+                    logger.info(
+                        "All models target %s; disabling parallel loading for stability.",
+                        unique_devices[0],
+                    )
+                    parallel_loading = False
+            except Exception:
+                # Never block loading due to heuristic.
+                pass
+
         if config.requires_parallel_loading() and parallel_loading:
             logger.info(
                 "Multiple distinct models detected. Using parallel loading for faster startup."

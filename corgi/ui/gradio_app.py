@@ -186,6 +186,14 @@ def _run_pipeline(
             )
 
         pipeline = _get_pipeline(cache_key, create_pipeline)
+        # Toggle batch evidence extraction on the cached pipeline.
+        try:
+            vlm = getattr(pipeline, "_vlm", None)
+            if vlm is not None and hasattr(vlm, "set_batch_evidence_enabled"):
+                vlm.set_batch_evidence_enabled(batch_captioning)
+        except Exception:
+            # UI toggle should never break pipeline execution.
+            pass
         result = _execute_pipeline_gpu(
             image=rgb_image,
             question=question.strip(),
@@ -250,6 +258,14 @@ def _prepare_ui_payload_components(
         result.steps[:max_slots], result.evidence
     )
 
+    # Step-by-step panels (per reasoning step)
+    step_panels = _prepare_step_panels_payload(
+        image=image,
+        steps=result.steps[:max_slots],
+        evidence=result.evidence,
+        max_slots=max_slots,
+    )
+
     # Evidence table
     evidence_table_text = _format_evidence_table_text(result.evidence, image)
 
@@ -292,6 +308,8 @@ def _prepare_ui_payload_components(
         "cot_text": cot_text,
         "structured_steps": structured_steps_text,
         "reasoning_prompt": reasoning_prompt_text,
+        # Step-by-step
+        "step_panels": step_panels,
         # ROI Extraction
         "roi_overview_image": roi_overview,
         "roi_gallery": roi_gallery,
@@ -315,6 +333,59 @@ def _prepare_ui_payload_components(
         # Performance
         "timing": timing_text,
     }
+
+
+def _prepare_step_panels_payload(
+    *,
+    image: Image.Image,
+    steps: List[ReasoningStep],
+    evidence: List[GroundedEvidence],
+    max_slots: int,
+) -> List[Dict[str, object]]:
+    evidences_by_step = _group_evidence_by_step(evidence)
+    panels: List[Dict[str, object]] = []
+
+    for slot_idx in range(max_slots):
+        if slot_idx >= len(steps):
+            panels.append({"visible": False, "markdown": "", "gallery": [], "has_gallery": False})
+            continue
+
+        step = steps[slot_idx]
+        evs = evidences_by_step.get(step.index, [])
+
+        md_lines = [
+            f"**Step {step.index}:** {step.statement}",
+            f"- Needs vision: {'Yes' if step.needs_vision else 'No'}",
+        ]
+        if hasattr(step, "need_ocr"):
+            md_lines.append(f"- Needs OCR: {'Yes' if step.need_ocr else 'No'}")
+        if step.reason:
+            md_lines.append(f"- Reason: {step.reason}")
+
+        if not evs:
+            md_lines.append("- Evidence: _none_")
+
+        gallery: List[Tuple[Image.Image, str]] = []
+        for ev in evs[:6]:
+            cropped = _crop_evidence_image(image, ev)
+            bbox = ", ".join(f"{coord:.3f}" for coord in ev.bbox)
+            caption_parts: List[str] = [f"bbox=({bbox})"]
+            if ev.ocr_text:
+                caption_parts.append(f"ocr: {ev.ocr_text.strip()[:160]}")
+            if ev.description:
+                caption_parts.append(f"caption: {ev.description.strip()[:200]}")
+            gallery.append((cropped, " | ".join(caption_parts)))
+
+        panels.append(
+            {
+                "visible": True,
+                "markdown": "\n".join(md_lines),
+                "gallery": gallery,
+                "has_gallery": bool(gallery),
+            }
+        )
+
+    return panels
 
 
 def _format_structured_steps_text(
@@ -649,8 +720,8 @@ def build_demo(
     except Exception as exc:
         logger.warning(f"Failed to warm up default pipeline: {exc}")
 
-    with gr.Blocks(title="CoRGI Pipeline Demo", css="""
-        .stage-header { 
+    demo_css = """
+        .stage-header {
             background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 8px 16px;
@@ -663,8 +734,13 @@ def build_demo(
             border-radius: 8px;
             padding: 16px;
         }
-    """) as demo:
+    """
+
+    # Gradio v6 moved/changed the Blocks CSS API; injecting <style> is the most compatible.
+    with gr.Blocks(title="CoRGI Pipeline Demo") as demo:
         state = gr.State()
+
+        gr.HTML(f"<style>{demo_css}</style>")
 
         # Header
         gr.Markdown("# CoRGI Pipeline\n\nChain of Reasoning with Grounded Insights - Scroll down to see step-by-step results")
@@ -756,6 +832,34 @@ def build_demo(
             )
             with gr.Accordion("View Reasoning Prompt", open=False):
                 reasoning_prompt_output = gr.Markdown()
+
+        # -----------------------------------------------------------------
+        # STEP-BY-STEP VIEW (per reasoning step)
+        # -----------------------------------------------------------------
+        with gr.Accordion("Step-by-step View (Reasoning → Evidence)", open=True):
+            gr.Markdown(
+                "*This section shows each reasoning step together with its extracted evidence regions.*"
+            )
+            step_accordions = []
+            step_markdown_outputs = []
+            step_gallery_outputs = []
+            for idx in range(MAX_UI_STEPS):
+                with gr.Accordion(
+                    f"Step {idx + 1}",
+                    open=(idx == 0),
+                    visible=False,
+                ) as step_acc:
+                    step_md = gr.Markdown()
+                    step_gallery = gr.Gallery(
+                        label="Evidence regions (cropped)",
+                        columns=3,
+                        height=240,
+                        allow_preview=True,
+                        visible=False,
+                    )
+                step_accordions.append(step_acc)
+                step_markdown_outputs.append(step_md)
+                step_gallery_outputs.append(step_gallery)
 
         # -----------------------------------------------------------------
         # STAGE 2: ROI Extraction (Grounding)
@@ -913,6 +1017,10 @@ def build_demo(
             has_ocr_gallery = len(payload.get("ocr_gallery", [])) > 0
             has_captioning_gallery = len(payload.get("captioning_gallery", [])) > 0
             input_image = payload.get("input_image")
+            step_panels = payload.get("step_panels") or [
+                {"visible": False, "markdown": "", "gallery": [], "has_gallery": False}
+                for _ in range(MAX_UI_STEPS)
+            ]
 
             outputs = [
                 new_state,
@@ -933,6 +1041,23 @@ def build_demo(
                 payload["cot_text"],
                 payload["structured_steps"],
                 payload["reasoning_prompt"],
+                # Step-by-step panels (fixed slots)
+                *list(
+                    itertools.chain.from_iterable(
+                        (
+                            gr.update(
+                                visible=panel.get("visible", False),
+                                open=(i == 0 and panel.get("visible", False)),
+                            ),
+                            panel.get("markdown", ""),
+                            gr.update(
+                                value=panel.get("gallery", []),
+                                visible=panel.get("has_gallery", False),
+                            ),
+                        )
+                        for i, panel in enumerate(step_panels)
+                    )
+                ),
                 # Grounding Tab
                 gr.update(
                     value=input_image, visible=input_image is not None
@@ -1011,6 +1136,15 @@ def build_demo(
                 cot_output,
                 structured_steps_output,
                 reasoning_prompt_output,
+                # Step-by-step panels (accordion + markdown + gallery) x MAX_UI_STEPS
+                *list(
+                    itertools.chain.from_iterable(
+                        (acc, md, gal)
+                        for acc, md, gal in zip(
+                            step_accordions, step_markdown_outputs, step_gallery_outputs
+                        )
+                    )
+                ),
                 # Grounding Tab
                 input_image_grounding,
                 roi_overview_output,

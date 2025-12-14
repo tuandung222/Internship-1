@@ -34,8 +34,24 @@ import argparse
 import logging
 import os
 import sys
+import warnings
 from pathlib import Path
 from typing import Optional
+
+# =============================================================================
+# Environment Defaults (reduce noisy logs)
+# =============================================================================
+
+# Reduce TensorFlow native logs if TF is present in the environment (often pulled in
+# indirectly by other ML packages).
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+# Prefer disabling TF/Flax backends in Transformers when not needed.
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("TRANSFORMERS_NO_FLAX", "1")
+
+# Some remote-code model packages may emit SyntaxWarning for regex escapes; keep
+# the console output readable.
+warnings.filterwarnings("ignore", category=SyntaxWarning, message="invalid escape sequence.*")
 
 # =============================================================================
 # Logging Configuration

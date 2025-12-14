@@ -500,7 +500,7 @@ Provide a detailed analysis:
         self,
         image: Image.Image,
         bboxes: List[Tuple[float, float, float, float]],
-        step_index: int,
+        step_index: Optional[int] = None,
         statement: Optional[str] = None,
     ) -> List[str]:
         """
@@ -533,7 +533,7 @@ Provide a detailed analysis:
 
         duration_ms = (time.time() - start_time) * 1000.0
         logger.info(
-            f"[SmolVLM2] Batch captioning completed: step={step_index}, regions={len(bboxes)}, "
+            f"[SmolVLM2] Batch captioning completed: step={step_index if step_index is not None else 'batch'}, regions={len(bboxes)}, "
             f"{duration_ms:.2f}ms total ({duration_ms/len(bboxes):.2f}ms/region)"
         )
         return captions
